@@ -1,0 +1,14 @@
+{
+  "name": "Mi Negocio - Punto de Venta",
+  "short_name": "Mi Negocio",
+  "description": "Gestión de ventas, stock, fiado y clientes para comercios de barrio",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f4f5f7",
+  "theme_color": "#4338ca",
+  "lang": "es-AR",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

@@ -1,0 +1,2714 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mi Negocio - Gestión fácil para tu comercio</title>
+<meta name="theme-color" content="#4338ca">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon.svg">
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://unpkg.com/@zxing/library@latest"></script>
+<style>
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 1.125rem;
+    line-height: 1.5;
+    background: #f4f5f7;
+    color: #1f2430;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .tap { transition: transform .08s ease, box-shadow .08s ease; }
+  .tap:active { transform: scale(0.96); }
+  .card { background: #fff; border-radius: 18px; border: 1px solid #eceef2; box-shadow: 0 1px 3px rgba(15,23,42,.05); }
+  .section-label { font-size: 0.8125rem; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; color: #8b8f9c; }
+  .icon-badge { width: 2.625rem; height: 2.625rem; border-radius: 12px; display:flex; align-items:center; justify-content:center; font-size: 1.25rem; flex-shrink:0; }
+  .badge-venc { font-size: 0.75rem; font-weight: 800; padding: 0.1875rem 0.625rem; border-radius: 999px; }
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  #toast-wrap { position: fixed; top: 14px; left: 50%; transform: translateX(-50%); z-index: 200; display:flex; flex-direction:column; gap:8px; align-items:center; width: 92%; max-width: 480px; }
+  .toast { background:#111827; color:#fff; padding: 0.875rem 1.25rem; border-radius: 1rem; font-size: 1.0625rem; font-weight:600; box-shadow: 0 6px 20px rgba(0,0,0,.25); display:flex; align-items:center; gap:10px; animation: slideDown .25s ease; }
+  @keyframes slideDown { from { opacity:0; transform: translateY(-14px);} to {opacity:1; transform: translateY(0);} }
+  #modal-wrap { position: fixed; inset:0; z-index: 150; display:none; }
+  #modal-backdrop { position:absolute; inset:0; background: rgba(17,24,39,.55); }
+  #modal-box { position:absolute; left:50%; bottom:0; transform: translateX(-50%); width:100%; max-width: 520px; background:#fff; border-radius: 26px 26px 0 0; max-height: 88vh; overflow-y:auto; animation: slideUp .22s ease; }
+  @media (min-width:640px){ #modal-box { bottom:auto; top:50%; transform: translate(-50%,-50%); border-radius:26px; } }
+  @keyframes slideUp { from { transform: translate(-50%, 40px); opacity:0;} to { transform: translate(-50%,0); opacity:1;} }
+  .pulse-mic { animation: pulseMic 1.4s infinite; }
+  @keyframes pulseMic { 0%{box-shadow:0 0 0 0 rgba(220,38,38,.45);} 70%{box-shadow:0 0 0 22px rgba(220,38,38,0);} 100%{box-shadow:0 0 0 0 rgba(220,38,38,0);} }
+  .bounce-add { animation: bounceAdd .28s ease; }
+  @keyframes bounceAdd { 0%{transform:scale(1);} 40%{transform:scale(1.08);} 100%{transform:scale(1);} }
+
+  /* ====================== FORMATO PC / PÁGINA WEB ======================
+     Todo lo de abajo son reglas que SOLO se activan en pantallas anchas
+     (min-width). Por debajo de esos anchos, el celular queda exactamente
+     igual que antes: nada de esto se aplica. */
+  .cards-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+  @media (min-width: 900px) {
+    body { padding-bottom: 0; padding-left: 232px; }
+    #app { max-width: 52rem; margin: 0 auto; }
+    .cards-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+    #nav-principal {
+      top: 0; bottom: 0; left: 0; right: auto;
+      width: 232px;
+      border-top: none; border-right: 1px solid #e5e7eb;
+      display: flex; align-items: stretch;
+      z-index: 40;
+    }
+    #nav-principal > div {
+      max-width: none; width: 100%;
+      display: flex; flex-direction: column;
+      padding: 1.75rem 0.875rem;
+      gap: 0.375rem;
+    }
+    #nav-principal .nav-boton {
+      flex-direction: row; justify-content: flex-start; gap: 0.75rem;
+      padding: 0.75rem 0.875rem; border-radius: 0.875rem;
+      width: 100%;
+    }
+    #nav-principal .nav-boton:hover { background: #f4f5f7; }
+    #nav-principal .nav-etiqueta { font-size: 0.95rem; }
+  }
+
+  @media (min-width: 1280px) {
+    #app { max-width: 68rem; }
+    .cards-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  }
+
+  /* Comprobantes y reportes imprimibles: invisibles en pantalla, solo se ven al imprimir */
+  #area-impresion { position: fixed; left: -9999px; top: 0; width: 320px; }
+  @media print {
+    body * { visibility: hidden; }
+    #area-impresion, #area-impresion * { visibility: visible; }
+    #area-impresion { position: absolute; left: 0; top: 0; width: auto; }
+  }
+</style>
+</head>
+<body class="pb-28">
+
+<div id="toast-wrap"></div>
+<div id="modal-wrap">
+  <div id="modal-backdrop" onclick="cerrarModal()"></div>
+  <div id="modal-box"></div>
+</div>
+<div id="area-impresion"></div>
+
+<div id="app" class="max-w-lg mx-auto min-h-screen"></div>
+
+<script>
+/* ====================== CUENTAS (multi-negocio) ====================== */
+// Cada "cuenta" es un negocio totalmente separado: sus propios productos,
+// ventas, usuarios, etc. Sirve para llevar la misma app a varios negocios
+// sin que se mezclen los datos de uno con los de otro.
+const CUENTAS_KEY = 'mercadoAppCuentas_v1';
+const CUENTA_ACTIVA_KEY = 'mercadoAppCuentaActiva';
+const STORAGE_KEY_LEGACY = 'mercadoAppData_v1'; // formato viejo, de una sola cuenta
+
+function cargarCuentas(){
+  try{
+    const raw = localStorage.getItem(CUENTAS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  }catch(e){ return []; }
+}
+function guardarCuentas(){
+  localStorage.setItem(CUENTAS_KEY, JSON.stringify(cuentas));
+}
+function migrarCuentaLegacy(){
+  if(localStorage.getItem(CUENTAS_KEY)) return;
+  const raw = localStorage.getItem(STORAGE_KEY_LEGACY);
+  if(!raw){ localStorage.setItem(CUENTAS_KEY, JSON.stringify([])); return; }
+  try{
+    const datosViejos = JSON.parse(raw);
+    if(!datosViejos.negocio){ localStorage.setItem(CUENTAS_KEY, JSON.stringify([])); return; }
+    const id = uid();
+    const storageKey = 'mercadoAppData_' + id;
+    localStorage.setItem(storageKey, raw);
+    const cuentaMigrada = { id, nombreCuenta: datosViejos.negocio.nombre, tipo: datosViejos.negocio.tipo, clave: '', storageKey };
+    localStorage.setItem(CUENTAS_KEY, JSON.stringify([cuentaMigrada]));
+    localStorage.setItem(CUENTA_ACTIVA_KEY, id);
+    localStorage.removeItem(STORAGE_KEY_LEGACY);
+  }catch(e){ localStorage.setItem(CUENTAS_KEY, JSON.stringify([])); }
+}
+function nombreRubro(tipo){
+  return { mercado:'Mercado / Despensa', ropa:'Tienda de ropa', bazar:'Bazar / Regalería', otro:'Otro rubro' }[tipo] || 'Otro rubro';
+}
+
+/* ====================== ESTADO Y PERSISTENCIA ====================== */
+function estadoVacio(){
+  return {
+    negocio: null, // {nombre, tipo}
+    productos: [],
+    categorias: [],
+    combos: [],
+    proveedores: [],
+    clientes: [],
+    ventas: [],
+    fiadoMovimientos: [],
+    cierres: [],
+    eliminaciones: [],
+    gastos: [],
+    usuarios: [],
+    usuarioActualId: '',
+    metaDiaria: 0,
+    tamanoLetra: 'normal'
+  };
+}
+
+migrarCuentaLegacy();
+let cuentas = cargarCuentas();
+let cuentaActivaId = localStorage.getItem(CUENTA_ACTIVA_KEY) || '';
+let state = (cuentaActivaId && cuentas.find(c=>c.id===cuentaActivaId)) ? cargarEstadoCuenta(cuentaActivaId) : estadoVacio();
+migrarProductos();
+
+function storageKeyActivo(){
+  const c = cuentas.find(x=>x.id===cuentaActivaId);
+  return c ? c.storageKey : null;
+}
+function cargarEstadoCuenta(id){
+  const c = cuentas.find(x=>x.id===id);
+  if(!c) return estadoVacio();
+  try{
+    const raw = localStorage.getItem(c.storageKey);
+    if(!raw) return estadoVacio();
+    const parsed = JSON.parse(raw);
+    return { ...estadoVacio(), ...parsed };
+  }catch(e){ return estadoVacio(); }
+}
+
+function migrarProductos(){
+  state.productos.forEach(p => {
+    if(p.marca === undefined) p.marca = '';
+    if(p.contenidoCantidad === undefined) p.contenidoCantidad = 1;
+    if(p.contenidoUnidad === undefined) p.contenidoUnidad = 'unidades';
+    if(p.vencimiento === undefined) p.vencimiento = '';
+    if(p.temporada === undefined) p.temporada = '';
+    if(p.categoriaId === undefined) p.categoriaId = '';
+    if(p.proveedorId === undefined) p.proveedorId = '';
+    if(p.codigoBarras === undefined) p.codigoBarras = '';
+  });
+}
+
+function guardar(){
+  const key = storageKeyActivo();
+  if(!key) return;
+  localStorage.setItem(key, JSON.stringify(state));
+}
+
+function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
+
+function money(n){
+  n = Math.round(Number(n)||0);
+  return '$' + n.toLocaleString('es-AR');
+}
+
+function fechaLarga(d = new Date()){
+  return new Intl.DateTimeFormat('es-AR', { weekday:'long', day:'numeric', month:'long' }).format(d);
+}
+function fechaHora(iso){
+  const d = new Date(iso);
+  return d.toLocaleDateString('es-AR') + ' ' + d.toLocaleTimeString('es-AR', {hour:'2-digit', minute:'2-digit'});
+}
+function inicioDeHoy(){
+  const d = new Date(); d.setHours(0,0,0,0); return d.getTime();
+}
+function diasParaVencer(fechaISO){
+  if(!fechaISO) return null;
+  const hoy = new Date(); hoy.setHours(0,0,0,0);
+  const venc = new Date(fechaISO + 'T00:00:00');
+  return Math.round((venc - hoy) / 86400000);
+}
+function formatearFechaCorta(fechaISO){
+  if(!fechaISO) return '';
+  const d = new Date(fechaISO + 'T00:00:00');
+  return d.toLocaleDateString('es-AR', { day:'2-digit', month:'2-digit', year:'numeric' });
+}
+function estadoVencimiento(fechaISO){
+  const dias = diasParaVencer(fechaISO);
+  if(dias === null) return null;
+  if(dias < 0) return { dias, texto: `Vencido hace ${Math.abs(dias)} día${Math.abs(dias)===1?'':'s'}`, color: 'red' };
+  if(dias === 0) return { dias, texto: 'Vence hoy', color: 'red' };
+  if(dias <= 7) return { dias, texto: `Vence en ${dias} día${dias===1?'':'s'}`, color: 'red' };
+  if(dias <= 30) return { dias, texto: `Vence en ${dias} días`, color: 'amber' };
+  return { dias, texto: `Vence el ${formatearFechaCorta(fechaISO)}`, color: 'green' };
+}
+const TEMPORADAS = ['Verano','Otoño','Invierno','Primavera'];
+function esRubroRopa(){ return !!(state.negocio && state.negocio.tipo === 'ropa'); }
+function temporadaActual(){
+  const mes = new Date().getMonth() + 1;
+  if([12,1,2].includes(mes)) return 'Verano';
+  if([3,4,5].includes(mes)) return 'Otoño';
+  if([6,7,8].includes(mes)) return 'Invierno';
+  return 'Primavera';
+}
+function estadoTemporadaProducto(p){
+  if(!p.temporada) return null;
+  const actual = temporadaActual();
+  if(p.temporada === actual) return { texto: 'En temporada', color: 'green' };
+  return { texto: `Fuera de temporada (${p.temporada})`, color: 'amber' };
+}
+function detalleProducto(p){
+  const partes = [];
+  if(p.marca) partes.push(p.marca);
+  if(!(p.contenidoUnidad === 'unidades' && Number(p.contenidoCantidad) === 1)){
+    partes.push(`${p.contenidoCantidad} ${p.contenidoUnidad}`);
+  }
+  return partes.join(' · ');
+}
+function esCumpleanosHoy(fechaISO){
+  if(!fechaISO) return false;
+  const hoy = new Date();
+  const d = new Date(fechaISO + 'T00:00:00');
+  return d.getMonth() === hoy.getMonth() && d.getDate() === hoy.getDate();
+}
+
+/* ====================== SEEDS POR TIPO DE NEGOCIO ====================== */
+// diasVenc: en cuántos días vence el lote actual (null = no se controla vencimiento para ese producto)
+const SEEDS = {
+  mercado: [
+    { nombre:'Pan', emoji:'🍞', marca:'', cant:1, unidad:'kg', precio:1500, costo:900, stock:20, stockMin:5, diasVenc:null },
+    { nombre:'Leche', emoji:'🥛', marca:'La Serenísima', cant:1, unidad:'L', precio:1800, costo:1200, stock:15, stockMin:5, diasVenc:10 },
+    { nombre:'Arroz', emoji:'🍚', marca:'Gallo', cant:1, unidad:'kg', precio:2200, costo:1500, stock:25, stockMin:8, diasVenc:null },
+    { nombre:'Fideos', emoji:'🍝', marca:'Matarazzo', cant:500, unidad:'g', precio:1900, costo:1300, stock:30, stockMin:8, diasVenc:null },
+    { nombre:'Aceite', emoji:'🫒', marca:'Natura', cant:900, unidad:'ml', precio:3800, costo:2900, stock:10, stockMin:4, diasVenc:5 },
+    { nombre:'Azúcar', emoji:'🧂', marca:'Ledesma', cant:1, unidad:'kg', precio:2000, costo:1400, stock:18, stockMin:6, diasVenc:null },
+    { nombre:'Yerba', emoji:'🧉', marca:'Playadito', cant:1, unidad:'kg', precio:5200, costo:3900, stock:12, stockMin:4, diasVenc:25 },
+    { nombre:'Huevos', emoji:'🥚', marca:'', cant:12, unidad:'unidades', precio:4500, costo:3200, stock:8, stockMin:3, diasVenc:3 },
+    { nombre:'Gaseosa', emoji:'🥤', marca:'Coca-Cola', cant:2, unidad:'L', precio:2600, costo:1800, stock:20, stockMin:6, diasVenc:120 },
+    { nombre:'Papel higiénico', emoji:'🧻', marca:'Higienol', cant:4, unidad:'unidades', precio:3200, costo:2200, stock:14, stockMin:5, diasVenc:null },
+  ],
+  ropa: [
+    { nombre:'Remera', emoji:'👕', marca:'', cant:1, unidad:'unidades', precio:8000, costo:4500, stock:20, stockMin:5, temporada:'' },
+    { nombre:'Remera manga corta', emoji:'👕', marca:'', cant:1, unidad:'unidades', precio:7500, costo:4000, stock:25, stockMin:6, temporada:'Verano' },
+    { nombre:'Pantalón jean', emoji:'👖', marca:'', cant:1, unidad:'unidades', precio:18000, costo:11000, stock:15, stockMin:4, temporada:'' },
+    { nombre:'Campera de abrigo', emoji:'🧥', marca:'', cant:1, unidad:'unidades', precio:35000, costo:22000, stock:8, stockMin:2, temporada:'Invierno' },
+    { nombre:'Buzo', emoji:'🧶', marca:'', cant:1, unidad:'unidades', precio:15000, costo:9000, stock:12, stockMin:3, temporada:'Invierno' },
+    { nombre:'Short', emoji:'🩳', marca:'', cant:1, unidad:'unidades', precio:9000, costo:5000, stock:15, stockMin:4, temporada:'Verano' },
+    { nombre:'Vestido', emoji:'👗', marca:'', cant:1, unidad:'unidades', precio:22000, costo:13000, stock:8, stockMin:2, temporada:'Primavera' },
+    { nombre:'Zapatillas', emoji:'👟', marca:'', cant:1, unidad:'par', precio:45000, costo:30000, stock:10, stockMin:3, temporada:'' },
+    { nombre:'Gorra', emoji:'🧢', marca:'', cant:1, unidad:'unidades', precio:6000, costo:3000, stock:20, stockMin:5, temporada:'Verano' },
+    { nombre:'Medias', emoji:'🧦', marca:'', cant:3, unidad:'par', precio:3500, costo:1800, stock:30, stockMin:8, temporada:'' },
+  ],
+  bazar: [
+    { nombre:'Vasos', emoji:'🥤', marca:'', cant:6, unidad:'unidades', precio:3200, costo:2000, stock:12, stockMin:4, diasVenc:null },
+    { nombre:'Platos', emoji:'🍽️', marca:'', cant:6, unidad:'unidades', precio:4800, costo:3200, stock:10, stockMin:3, diasVenc:null },
+    { nombre:'Detergente', emoji:'🧽', marca:'Magistral', cant:750, unidad:'ml', precio:2100, costo:1400, stock:18, stockMin:6, diasVenc:null },
+    { nombre:'Escoba', emoji:'🧹', marca:'', cant:1, unidad:'unidades', precio:3500, costo:2200, stock:8, stockMin:3, diasVenc:null },
+    { nombre:'Repasador', emoji:'🧻', marca:'', cant:1, unidad:'unidades', precio:1500, costo:900, stock:20, stockMin:6, diasVenc:null },
+    { nombre:'Velas', emoji:'🕯️', marca:'', cant:6, unidad:'unidades', precio:1800, costo:1100, stock:15, stockMin:5, diasVenc:null },
+    { nombre:'Pilas AA', emoji:'🔋', marca:'Duracell', cant:4, unidad:'unidades', precio:2600, costo:1700, stock:20, stockMin:6, diasVenc:null },
+    { nombre:'Bolsas de residuo', emoji:'🗑️', marca:'', cant:20, unidad:'unidades', precio:1900, costo:1200, stock:25, stockMin:8, diasVenc:null },
+    { nombre:'Esponja', emoji:'🧽', marca:'Scotch-Brite', cant:3, unidad:'unidades', precio:1300, costo:800, stock:20, stockMin:6, diasVenc:null },
+    { nombre:'Tupper', emoji:'📦', marca:'', cant:1, unidad:'unidades', precio:3800, costo:2500, stock:10, stockMin:3, diasVenc:null },
+  ],
+  otro: []
+};
+
+function crearProductosSeed(tipo){
+  const lista = SEEDS[tipo] || [];
+  return lista.map(s => ({
+    id: uid(), nombre: s.nombre, emoji: s.emoji, marca: s.marca,
+    contenidoCantidad: s.cant, contenidoUnidad: s.unidad,
+    categoriaId: '', proveedorId: '', codigoBarras: '',
+    precio: s.precio, costo: s.costo, stock: s.stock, stockMin: s.stockMin,
+    vencimiento: s.diasVenc != null ? new Date(Date.now() + s.diasVenc*86400000).toISOString().slice(0,10) : '',
+    temporada: s.temporada || ''
+  }));
+}
+
+/* ====================== TOASTS ====================== */
+function toast(msg, opts = {}){
+  const wrap = document.getElementById('toast-wrap');
+  const el = document.createElement('div');
+  el.className = 'toast';
+  const acciones = opts.acciones || (opts.accion ? [opts.accion] : []);
+  el.innerHTML = `<span>${opts.icon || '✅'}</span><span>${msg}</span>` + acciones.map(a => `<button class="ml-2 underline decoration-2" onclick="${a.fn}">${a.texto}</button>`).join('');
+  wrap.appendChild(el);
+  setTimeout(()=>{ el.style.opacity='0'; el.style.transition='opacity .3s'; setTimeout(()=>el.remove(), 300); }, opts.duracion || 3200);
+}
+
+/* ====================== MODAL ====================== */
+function abrirModal(html){
+  document.getElementById('modal-box').innerHTML = html;
+  document.getElementById('modal-wrap').style.display = 'block';
+}
+function cerrarModal(){
+  detenerEscaneo();
+  document.getElementById('modal-wrap').style.display = 'none';
+  document.getElementById('modal-box').innerHTML = '';
+}
+
+/* ====================== ESCÁNER DE CÓDIGO DE BARRAS ====================== */
+let lectorCodigoBarras = null;
+function iniciarEscaneo(onDetectado){
+  if(typeof ZXing === 'undefined' || !navigator.mediaDevices){
+    toast('Tu navegador no puede usar la cámara para escanear. Escribí el código a mano.', { icon:'📷', duracion:4500 });
+    return;
+  }
+  abrirModal(`
+    <div class="p-5">
+      <div class="text-xl font-extrabold text-gray-900 mb-3">📷 Escaneá el código de barras</div>
+      <video id="video-escaner" class="w-full rounded-2xl bg-black" style="aspect-ratio:4/3; object-fit:cover;" muted playsinline></video>
+      <div class="text-gray-400 text-center text-sm mt-3">Apuntá la cámara al código de barras del producto</div>
+      <button onclick="cerrarModal()" class="tap w-full bg-gray-100 text-gray-700 font-bold py-3 rounded-2xl mt-4">Cancelar</button>
+    </div>
+  `);
+  const reader = new ZXing.BrowserMultiFormatReader();
+  lectorCodigoBarras = reader;
+  reader.decodeFromVideoDevice(null, 'video-escaner', (resultado) => {
+    if(resultado){
+      const codigo = resultado.getText();
+      detenerEscaneo();
+      cerrarModal();
+      onDetectado(codigo);
+    }
+  }).catch(() => {
+    toast('No se pudo acceder a la cámara. Revisá los permisos del navegador.', { icon:'📷', duracion:4500 });
+    cerrarModal();
+  });
+}
+function detenerEscaneo(){
+  if(lectorCodigoBarras){
+    try{ lectorCodigoBarras.reset(); }catch(e){}
+    lectorCodigoBarras = null;
+  }
+}
+
+/* Confirmación propia de la app (no usa el confirm() nativo del navegador,
+   que en algunos navegadores/celulares o WebViews falla o ni se muestra) */
+let _confirmCallback = null;
+function confirmarAccion(mensaje, callback, textoConfirmar = 'Sí, eliminar'){
+  _confirmCallback = callback;
+  abrirModal(`
+    <div class="p-5 text-center">
+      <div class="text-4xl mb-3">⚠️</div>
+      <div class="text-lg font-bold text-gray-900 mb-6">${mensaje}</div>
+      <button onclick="ejecutarConfirmacion()" class="tap w-full bg-red-600 text-white font-bold py-4 rounded-2xl text-lg mb-2">${textoConfirmar}</button>
+      <button onclick="cerrarModal()" class="tap w-full bg-gray-100 text-gray-700 font-bold py-3.5 rounded-2xl text-lg">Cancelar</button>
+    </div>
+  `);
+}
+function ejecutarConfirmacion(){
+  const cb = _confirmCallback;
+  _confirmCallback = null;
+  if(cb) cb();
+}
+
+/* ====================== ROUTER ====================== */
+window.addEventListener('hashchange', renderApp);
+window.addEventListener('DOMContentLoaded', () => { aplicarTamanoLetra(); renderApp(); });
+
+if('serviceWorker' in navigator){
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(()=>{});
+  });
+}
+
+/* Evita que scrollear con la rueda/trackpad sobre un campo numérico le cambie el valor
+   (comportamiento por defecto de Chrome que hace que precios/stock "cambien solos") */
+document.addEventListener('wheel', (e) => {
+  if(e.target && e.target.tagName === 'INPUT' && e.target.type === 'number'){
+    e.target.blur();
+  }
+}, { passive: true });
+
+function aplicarTamanoLetra(){
+  const tallas = { pequeno: '14px', normal: '16px', grande: '18px', 'muy-grande': '20px' };
+  document.documentElement.style.fontSize = tallas[state.tamanoLetra] || '16px';
+}
+
+function ir(hash){ location.hash = hash; }
+
+let mostrandoNuevaCuenta = false;
+function renderApp(){
+  const app = document.getElementById('app');
+  if(!cuentaActivaId || !cuentas.find(c=>c.id===cuentaActivaId)){
+    app.innerHTML = mostrandoNuevaCuenta ? vistaOnboarding() : vistaSelectorCuentas();
+    return;
+  }
+  if(!state.negocio){
+    app.innerHTML = vistaOnboarding();
+    return;
+  }
+  const ruta = (location.hash || '#/inicio').replace('#/','');
+  const [pantalla] = ruta.split('/');
+  let contenido = '';
+  switch(pantalla){
+    case 'inicio': contenido = vistaInicio(); break;
+    case 'caja': contenido = vistaCaja(); break;
+    case 'fiado': contenido = vistaFiado(); break;
+    case 'stock': contenido = vistaStock(); break;
+    case 'vencimientos': contenido = vistaVencimientos(); break;
+    case 'cierre': contenido = vistaCierre(); break;
+    case 'proveedores': contenido = vistaProveedores(); break;
+    case 'gastos': contenido = vistaGastos(); break;
+    case 'mas': contenido = vistaMas(); break;
+    case 'clientes': contenido = vistaClientes(); break;
+    case 'reportes': contenido = vistaReportes(); break;
+    case 'config': contenido = vistaConfig(); break;
+    default: contenido = vistaInicio();
+  }
+  app.innerHTML = `
+    ${cabecera()}
+    <div class="px-4">${contenido}</div>
+    ${navInferior(pantalla)}
+  `;
+  if(pantalla === 'inicio') dibujarGraficoSemana();
+  if(pantalla === 'reportes') dibujarGraficoReportes();
+}
+
+/* ====================== SELECTOR DE CUENTAS (multi-negocio) ====================== */
+function vistaSelectorCuentas(){
+  return `
+  <div class="min-h-screen flex flex-col items-center justify-center px-6 text-center">
+    <div class="text-6xl mb-4">🏪</div>
+    <h1 class="text-3xl font-extrabold text-gray-900 mb-2">${cuentas.length ? '¿Qué negocio abrís?' : '¡Bienvenido!'}</h1>
+    <p class="text-gray-500 mb-8 text-lg">${cuentas.length ? 'Cada negocio tiene sus datos completamente separados.' : 'Vamos a armar tu negocio, muy fácil.'}</p>
+    ${cuentas.length ? `
+    <div class="flex flex-col gap-3 w-full mb-6">
+      ${cuentas.map(c => `
+        <button onclick="intentarAbrirCuenta('${c.id}')" class="tap card p-4 flex items-center gap-3 text-left">
+          <span class="icon-badge" style="background:#eef0ff; color:#4338ca; font-weight:800;">${c.nombreCuenta.charAt(0).toUpperCase()}</span>
+          <span class="min-w-0">
+            <span class="font-bold text-gray-800 block truncate">${c.nombreCuenta}</span>
+            <span class="text-gray-400 text-sm">${nombreRubro(c.tipo)}</span>
+          </span>
+        </button>`).join('')}
+    </div>` : ''}
+    <button onclick="mostrarNuevaCuenta()" class="tap w-full bg-indigo-700 text-white font-bold text-lg py-4 rounded-2xl shadow-lg">+ Nuevo negocio</button>
+  </div>`;
+}
+function intentarAbrirCuenta(id){
+  const c = cuentas.find(x=>x.id===id);
+  if(!c) return;
+  if(!c.clave){ abrirCuenta(id); return; }
+  abrirModal(`
+    <div class="p-5 text-center">
+      <div class="text-xl font-extrabold text-gray-900 mb-1">${c.nombreCuenta}</div>
+      <div class="text-gray-400 mb-4">Ingresá la clave de este negocio</div>
+      <input id="clave-cuenta-input" type="password" placeholder="Clave" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg text-center mb-4" />
+      <button onclick="verificarClaveCuenta('${id}')" class="tap w-full bg-indigo-700 text-white font-bold py-4 rounded-2xl text-lg">Entrar</button>
+    </div>
+  `);
+}
+function verificarClaveCuenta(id){
+  const c = cuentas.find(x=>x.id===id);
+  const val = document.getElementById('clave-cuenta-input').value;
+  if(val === c.clave){
+    cerrarModal();
+    abrirCuenta(id);
+  } else {
+    toast('Clave incorrecta', {icon:'⚠️'});
+  }
+}
+function abrirCuenta(id){
+  cuentaActivaId = id;
+  localStorage.setItem(CUENTA_ACTIVA_KEY, id);
+  state = cargarEstadoCuenta(id);
+  migrarProductos();
+  aplicarTamanoLetra();
+  ir('#/inicio');
+  renderApp();
+}
+function cerrarCuenta(){
+  cuentaActivaId = '';
+  localStorage.removeItem(CUENTA_ACTIVA_KEY);
+  state = estadoVacio();
+  mostrandoNuevaCuenta = false;
+  location.hash = '';
+  renderApp();
+}
+function mostrarNuevaCuenta(){
+  mostrandoNuevaCuenta = true;
+  onboardingPaso = 1;
+  onboardingNombre = '';
+  onboardingClave = '';
+  renderApp();
+}
+
+/* ====================== ONBOARDING (nuevo negocio) ====================== */
+let onboardingPaso = 1;
+let onboardingNombre = '';
+let onboardingClave = '';
+
+function vistaOnboarding(){
+  if(onboardingPaso === 1){
+    return `
+    <div class="min-h-screen flex flex-col items-center justify-center px-6 text-center">
+      <div class="text-6xl mb-4">🏪</div>
+      <h1 class="text-3xl font-extrabold text-gray-900 mb-2">Nuevo negocio</h1>
+      <p class="text-gray-500 mb-8 text-lg">Vamos a armarlo en 3 pasos, muy fácil.</p>
+      <div class="card w-full p-6">
+        <label class="block text-left font-bold text-gray-700 mb-2 text-lg">¿Cómo se llama tu negocio?</label>
+        <input id="input-nombre-negocio" type="text" placeholder="Ej: Almacén Don José"
+          class="w-full border-2 border-gray-200 rounded-2xl px-4 py-4 text-xl focus:border-indigo-600 focus:outline-none" />
+        <button onclick="continuarOnboarding1()" class="tap mt-5 w-full bg-indigo-700 text-white font-bold text-xl py-4 rounded-2xl shadow-lg">
+          Continuar →
+        </button>
+      </div>
+      ${cuentas.length ? `<button onclick="cerrarCuenta()" class="mt-6 text-gray-400 font-semibold">← Volver</button>` : ''}
+    </div>`;
+  }
+  if(onboardingPaso === 2){
+    return `
+    <div class="min-h-screen flex flex-col items-center justify-center px-6 text-center">
+      <div class="text-5xl mb-3">🔒</div>
+      <h1 class="text-2xl font-extrabold text-gray-900 mb-1">Protegé tu negocio</h1>
+      <p class="text-gray-500 mb-6 text-lg">Ponele una clave para que solo vos puedas entrar (opcional, pero recomendado)</p>
+      <div class="card w-full p-6">
+        <input id="input-clave-negocio" type="password" placeholder="Clave (dejalo vacío si no querés)"
+          class="w-full border-2 border-gray-200 rounded-2xl px-4 py-4 text-xl text-center focus:border-indigo-600 focus:outline-none" />
+        <button onclick="continuarOnboarding2()" class="tap mt-5 w-full bg-indigo-700 text-white font-bold text-xl py-4 rounded-2xl shadow-lg">
+          Continuar →
+        </button>
+      </div>
+      <button onclick="onboardingPaso=1; renderApp();" class="mt-6 text-gray-400 font-semibold">← Volver</button>
+    </div>`;
+  }
+  return `
+    <div class="min-h-screen flex flex-col items-center justify-center px-6 text-center">
+      <div class="text-5xl mb-3">👋</div>
+      <h1 class="text-2xl font-extrabold text-gray-900 mb-1">Hola, ${onboardingNombre}</h1>
+      <p class="text-gray-500 mb-6 text-lg">¿Qué tipo de negocio tenés? (esto no se puede cambiar después)</p>
+      <div class="grid cards-grid gap-4 w-full">
+        ${botonTipo('mercado','🛒','Mercado / Despensa')}
+        ${botonTipo('ropa','👕','Tienda de ropa')}
+        ${botonTipo('bazar','🎁','Bazar / Regalería')}
+        ${botonTipo('otro','🏪','Otro rubro')}
+      </div>
+      <button onclick="onboardingPaso=2; renderApp();" class="mt-6 text-gray-400 font-semibold">← Volver</button>
+    </div>`;
+}
+function botonTipo(tipo, emoji, label){
+  return `<button onclick="finalizarOnboarding('${tipo}')" class="tap card p-5 flex flex-col items-center gap-2 border-2 border-transparent hover:border-indigo-500">
+    <span class="text-4xl">${emoji}</span>
+    <span class="font-bold text-gray-800">${label}</span>
+  </button>`;
+}
+function continuarOnboarding1(){
+  const val = document.getElementById('input-nombre-negocio').value.trim();
+  if(!val){ toast('Escribí el nombre de tu negocio', {icon:'✍️'}); return; }
+  onboardingNombre = val;
+  onboardingPaso = 2;
+  renderApp();
+}
+function continuarOnboarding2(){
+  onboardingClave = document.getElementById('input-clave-negocio').value.trim();
+  onboardingPaso = 3;
+  renderApp();
+}
+function finalizarOnboarding(tipo){
+  const id = uid();
+  const storageKey = 'mercadoAppData_' + id;
+  cuentas.push({ id, nombreCuenta: onboardingNombre, tipo, clave: onboardingClave, storageKey });
+  guardarCuentas();
+  cuentaActivaId = id;
+  localStorage.setItem(CUENTA_ACTIVA_KEY, id);
+  state = estadoVacio();
+  state.negocio = { nombre: onboardingNombre, tipo };
+  state.productos = crearProductosSeed(tipo);
+  guardar();
+  mostrandoNuevaCuenta = false;
+  toast(`¡Listo! Ya cargamos ${state.productos.length} productos de ejemplo para que empieces`, {icon:'🎉', duracion:4500});
+  ir('#/inicio');
+  renderApp();
+}
+
+/* ====================== CABECERA Y NAV ====================== */
+function cabecera(){
+  const inicial = (state.negocio.nombre || '?').trim().charAt(0).toUpperCase();
+  return `
+  <div class="px-4 pt-5 pb-3 flex items-center justify-between">
+    <div class="flex items-center gap-3 min-w-0">
+      <div class="icon-badge" style="background:#eef0ff; color:#4338ca; font-weight:800; font-size:18px;">${inicial}</div>
+      <div class="min-w-0">
+        <div class="text-xl font-extrabold text-gray-900 leading-tight truncate">${state.negocio.nombre}</div>
+        <div class="text-gray-400 text-sm capitalize">${fechaLarga()}</div>
+        ${state.usuarios.length ? `<button onclick="mostrarSelectorUsuario()" class="tap text-indigo-700 text-sm font-bold mt-0.5">👤 ${usuarioActualNombre()} ▾</button>` : ''}
+      </div>
+    </div>
+    <button onclick="ir('#/config')" class="tap w-11 h-11 rounded-full bg-white card flex items-center justify-center text-xl flex-shrink-0">⚙️</button>
+  </div>`;
+}
+
+function navInferior(activo){
+  const items = [
+    ['inicio','🏠','Inicio'],
+    ['caja','🛒','Vender'],
+    ['fiado','📒','Fiado'],
+    ['stock','📦','Stock'],
+    ['mas','☰','Más'],
+  ];
+  return `
+  <div id="nav-principal" class="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-40">
+    <div class="max-w-lg mx-auto grid grid-cols-5 px-1 py-1">
+      ${items.map(([ruta,emoji,label]) => `
+        <button onclick="ir('#/${ruta}')" class="tap nav-boton flex flex-col items-center py-2 gap-0.5 ${activo===ruta?'text-indigo-700':'text-gray-400'}">
+          <span class="nav-icono w-9 h-9 flex items-center justify-center rounded-xl text-xl ${activo===ruta?'bg-indigo-50':''}">${emoji}</span>
+          <span class="nav-etiqueta text-[11px] font-bold">${label}</span>
+        </button>
+      `).join('')}
+    </div>
+  </div>`;
+}
+
+/* ====================== INICIO / DASHBOARD ====================== */
+function vistaInicio(){
+  const hoy = inicioDeHoy();
+  const ventasHoy = state.ventas.filter(v => v.fecha >= hoy);
+  const totalHoy = ventasHoy.reduce((s,v)=>s+v.total,0);
+  const gananciaHoy = ventasHoy.reduce((s,v)=>s+v.ganancia,0);
+  const totalFiado = state.clientes.reduce((s,c)=>s+(c.fiado||0),0);
+  const bajoStock = state.productos.filter(p => p.stock <= p.stockMin);
+  const porVencer = esRubroRopa() ? [] : state.productos
+    .filter(p => p.vencimiento)
+    .map(p => ({ p, est: estadoVencimiento(p.vencimiento) }))
+    .filter(x => x.est.dias <= 7)
+    .sort((a,b)=>a.est.dias-b.est.dias);
+  const fueraDeTemporada = esRubroRopa() ? state.productos.filter(p => p.temporada && p.temporada !== temporadaActual()) : [];
+  const cumpleanosHoy = state.clientes.filter(c => esCumpleanosHoy(c.cumpleanos));
+
+  return `
+  <div class="grid cards-grid gap-3 mt-2">
+    ${tarjetaStat('💰','Vendiste hoy', money(totalHoy), '#ecfdf5', '#059669', "ir('#/reportes')")}
+    ${tarjetaStat('📈','Ganancia de hoy', money(gananciaHoy), '#eef0ff', '#4338ca', "ir('#/reportes')")}
+    ${tarjetaStat('📒','Te deben (fiado)', money(totalFiado), '#fffbeb', '#b45309', "ir('#/fiado')")}
+    ${tarjetaStat('📦','Para reponer', bajoStock.length + ' producto' + (bajoStock.length===1?'':'s'), bajoStock.length>0 ? '#fef2f2' : '#f4f5f7', bajoStock.length>0 ? '#dc2626' : '#9ca3af', "ir('#/stock')")}
+  </div>
+
+  ${bajoStock.length ? `
+  <div class="card p-4 mt-4">
+    <div class="font-bold text-red-600 mb-2 flex items-center gap-2 text-lg">⚠️ Se te está por acabar</div>
+    <div class="flex flex-col gap-2">
+      ${bajoStock.slice(0,4).map(p => `
+        <div class="flex items-center justify-between text-gray-700">
+          <span>${p.emoji} ${p.nombre}</span>
+          <span class="font-bold">Quedan ${p.stock}</span>
+        </div>`).join('')}
+    </div>
+    <button onclick="ir('#/stock')" class="tap mt-3 w-full bg-red-600 text-white font-bold py-3 rounded-xl">Ver todo el stock</button>
+  </div>` : ''}
+
+  ${porVencer.length ? `
+  <div class="card p-4 mt-4">
+    <div class="font-bold text-amber-600 mb-2 flex items-center gap-2 text-lg">⏳ Por vencer pronto</div>
+    <div class="flex flex-col gap-2">
+      ${porVencer.slice(0,4).map(({p,est}) => `
+        <div class="flex items-center justify-between text-gray-700">
+          <span>${p.emoji} ${p.nombre}</span>
+          <span class="font-bold ${est.dias<0?'text-red-600':'text-amber-600'}">${est.texto}</span>
+        </div>`).join('')}
+    </div>
+    <button onclick="ir('#/vencimientos')" class="tap mt-3 w-full bg-amber-500 text-white font-bold py-3 rounded-xl">Ver vencimientos</button>
+  </div>` : ''}
+
+  ${fueraDeTemporada.length ? `
+  <div class="card p-4 mt-4">
+    <div class="font-bold text-amber-600 mb-2 flex items-center gap-2 text-lg">🌦️ Fuera de temporada</div>
+    <div class="flex flex-col gap-2">
+      ${fueraDeTemporada.slice(0,4).map(p => `
+        <div class="flex items-center justify-between text-gray-700">
+          <span>${p.emoji} ${p.nombre}</span>
+          <span class="font-bold text-amber-600">${p.temporada}</span>
+        </div>`).join('')}
+    </div>
+    <button onclick="ir('#/vencimientos')" class="tap mt-3 w-full bg-amber-500 text-white font-bold py-3 rounded-xl">Ver temporadas</button>
+  </div>` : ''}
+
+  ${cumpleanosHoy.length ? `
+  <div class="card p-4 mt-4">
+    <div class="font-bold text-gray-800 mb-2 flex items-center gap-2 text-lg">🎂 Cumpleaños de hoy</div>
+    <div class="flex flex-col gap-2">
+      ${cumpleanosHoy.map(c => `
+        <div class="flex items-center justify-between text-gray-700">
+          <span>👤 ${c.nombre}</span>
+          ${c.telefono ? `<a href="https://wa.me/${limpiarTelefono(c.telefono)}?text=${encodeURIComponent('¡Feliz cumpleaños, '+c.nombre+'! De parte de todo el equipo de '+state.negocio.nombre+'. 🎉')}" target="_blank" class="tap bg-indigo-50 text-indigo-700 font-bold px-3 py-1.5 rounded-lg text-sm">Saludar</a>` : `<span class="text-gray-300 text-sm">Sin teléfono</span>`}
+        </div>`).join('')}
+    </div>
+  </div>` : ''}
+
+  ${state.metaDiaria > 0 ? `
+  <div class="card p-4 mt-4">
+    <div class="flex items-center justify-between mb-2">
+      <div class="section-label">🎯 Meta de hoy</div>
+      <div class="font-bold text-gray-700">${money(totalHoy)} / ${money(state.metaDiaria)}</div>
+    </div>
+    <div class="w-full h-3 bg-gray-100 rounded-full overflow-hidden">
+      <div class="h-full ${totalHoy>=state.metaDiaria ? 'bg-green-500' : 'bg-indigo-600'}" style="width:${Math.min(100, totalHoy/state.metaDiaria*100)}%"></div>
+    </div>
+    ${totalHoy>=state.metaDiaria ? `<div class="text-green-600 font-bold text-sm mt-2">🎉 ¡Meta cumplida!</div>` : `<div class="text-gray-400 text-sm mt-2">Te falta ${money(state.metaDiaria-totalHoy)} para llegar</div>`}
+  </div>` : ''}
+
+  <div class="card p-4 mt-4">
+    <div class="section-label mb-2">Últimos 7 días</div>
+    <canvas id="chart-semana" height="160"></canvas>
+  </div>
+
+  <button onclick="ir('#/caja')" class="tap w-full mt-4 mb-2 bg-indigo-700 text-white font-extrabold text-xl py-5 rounded-2xl shadow-lg flex items-center justify-center gap-2">
+    🎤 Vender ahora
+  </button>
+  <button onclick="compartirResumenDia()" class="tap w-full mb-2 bg-white border-2 border-gray-200 text-gray-700 font-bold text-lg py-3.5 rounded-2xl flex items-center justify-center gap-2">
+    📤 Compartir resumen de hoy
+  </button>
+  `;
+}
+function compartirResumenDia(){
+  const hoy = inicioDeHoy();
+  const ventasHoy = state.ventas.filter(v => v.fecha >= hoy);
+  const totalHoy = ventasHoy.reduce((s,v)=>s+v.total,0);
+  const gananciaHoy = ventasHoy.reduce((s,v)=>s+v.ganancia,0);
+  const bajoStock = state.productos.filter(p => p.stock <= p.stockMin).length;
+  const msg = `📊 Resumen de hoy - ${state.negocio.nombre}\n\n💰 Vendido: ${money(totalHoy)}\n📈 Ganancia: ${money(gananciaHoy)}\n🧾 Ventas: ${ventasHoy.length}`
+    + (bajoStock ? `\n⚠️ ${bajoStock} producto(s) por reponer` : '');
+  window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank');
+}
+function tarjetaStat(emoji, label, valor, colorFondo, colorTexto, onclick){
+  return `
+  <button onclick="${onclick}" class="tap card p-4 text-left flex flex-col gap-2">
+    <div class="icon-badge" style="background:${colorFondo}; color:${colorTexto};">${emoji}</div>
+    <div>
+      <div class="section-label">${label}</div>
+      <div class="text-2xl font-extrabold text-gray-900 mt-0.5">${valor}</div>
+    </div>
+  </button>`;
+}
+function dibujarGraficoSemana(){
+  const ctx = document.getElementById('chart-semana');
+  if(!ctx) return;
+  const dias = [];
+  const totales = [];
+  for(let i=6;i>=0;i--){
+    const d = new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate()-i);
+    const dSig = d.getTime() + 24*3600*1000;
+    dias.push(d.toLocaleDateString('es-AR',{weekday:'short'}));
+    const total = state.ventas.filter(v => v.fecha >= d.getTime() && v.fecha < dSig).reduce((s,v)=>s+v.total,0);
+    totales.push(total);
+  }
+  new Chart(ctx, {
+    type: 'bar',
+    data: { labels: dias, datasets: [{ data: totales, backgroundColor: '#4338ca', borderRadius: 8 }] },
+    options: {
+      plugins: { legend: { display:false } },
+      scales: { y: { beginAtZero:true, ticks:{ display:false }, grid:{ display:false } }, x: { grid:{ display:false } } }
+    }
+  });
+}
+
+/* ====================== CAJA (VENDER) ====================== */
+let carrito = {}; // productoId -> cantidad
+let carritoCombos = {}; // comboId -> cantidad
+let busquedaCaja = '';
+let filtroCategoriaCaja = '';
+
+function vistaCaja(){
+  const texto = busquedaCaja.trim().toLowerCase();
+  const enVistaCombos = !texto && filtroCategoriaCaja === '__combos__';
+  const filtroProductoEfectivo = filtroCategoriaCaja === '__combos__' ? '' : filtroCategoriaCaja;
+
+  const productos = state.productos
+    .filter(p => {
+      if(!texto) return true;
+      const cat = state.categorias.find(c=>c.id===p.categoriaId);
+      return p.nombre.toLowerCase().includes(texto) || (p.marca||'').toLowerCase().includes(texto) || (cat && cat.nombre.toLowerCase().includes(texto)) || (p.codigoBarras && p.codigoBarras.includes(texto));
+    })
+    .filter(p => !filtroProductoEfectivo || p.categoriaId === filtroProductoEfectivo);
+
+  const combosVisibles = enVistaCombos
+    ? state.combos
+    : (texto ? state.combos.filter(c => c.nombre.toLowerCase().includes(texto)) : []);
+
+  const items = Object.entries(carrito).filter(([,c])=>c>0);
+  const combosCarrito = Object.entries(carritoCombos).filter(([,c])=>c>0);
+  const totalItems = items.reduce((s,[id,c]) => { const p = state.productos.find(x=>x.id===id); return s + (p?p.precio*c:0); }, 0);
+  const totalCombos = combosCarrito.reduce((s,[id,c]) => { const cb = state.combos.find(x=>x.id===id); return s + (cb?cb.precio*c:0); }, 0);
+  const total = totalItems + totalCombos;
+  const cantidadTotal = items.reduce((s,[,c])=>s+c,0) + combosCarrito.reduce((s,[,c])=>s+c,0);
+  const hayCarrito = items.length>0 || combosCarrito.length>0;
+
+  return `
+  <div class="grid grid-cols-2 gap-2 mt-2 mb-3">
+    <button onclick="iniciarVoz()" id="btn-voz" class="tap bg-red-50 border-2 border-red-200 text-red-700 font-bold text-lg py-4 rounded-2xl flex items-center justify-center gap-2">
+      🎤 Por voz
+    </button>
+    <button onclick="escanearParaVender()" class="tap bg-indigo-50 border-2 border-indigo-100 text-indigo-700 font-bold text-lg py-4 rounded-2xl flex items-center justify-center gap-2">
+      📷 Escanear
+    </button>
+  </div>
+
+  <input id="input-busqueda-caja" type="text" value="${busquedaCaja}" oninput="busquedaCaja=this.value; renderApp();" placeholder="Buscar producto o categoría..."
+    class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg mb-3 focus:border-indigo-600 focus:outline-none" />
+
+  <div class="flex gap-2 mb-3 overflow-x-auto pb-1">
+    <button onclick="filtroCategoriaCaja=''; renderApp();" class="tap flex-shrink-0 px-4 py-2 rounded-full font-bold text-sm ${filtroCategoriaCaja===''?'bg-indigo-700 text-white':'bg-white text-gray-500 border-2 border-gray-200'}">Todos</button>
+    ${state.categorias.map(c=>`<button onclick="filtroCategoriaCaja='${c.id}'; renderApp();" class="tap flex-shrink-0 px-4 py-2 rounded-full font-bold text-sm ${filtroCategoriaCaja===c.id?'bg-indigo-700 text-white':'bg-white text-gray-500 border-2 border-gray-200'}">${c.nombre}</button>`).join('')}
+    <button onclick="filtroCategoriaCaja='__combos__'; renderApp();" class="tap flex-shrink-0 px-4 py-2 rounded-full font-bold text-sm ${filtroCategoriaCaja==='__combos__'?'bg-indigo-700 text-white':'bg-white text-gray-500 border-2 border-gray-200'}">🎁 Combos</button>
+  </div>
+
+  ${enVistaCombos ? `
+    ${state.combos.length ? `
+    <div class="grid cards-grid gap-3 ${hayCarrito ? 'mb-32' : 'mb-4'}">
+      ${state.combos.map(tarjetaComboCaja).join('')}
+    </div>` : `
+    <button onclick="mostrarFormCombo()" class="tap w-full card border-2 border-dashed border-indigo-200 text-indigo-700 font-bold py-3.5 rounded-2xl mb-4 flex items-center justify-center gap-2">
+      🎁 Armá tu primer combo
+    </button>`}
+  ` : `
+    ${combosVisibles.length ? `
+    <div class="section-label mb-2">Combos</div>
+    <div class="grid cards-grid gap-3 mb-4">
+      ${combosVisibles.map(tarjetaComboCaja).join('')}
+    </div>` : ''}
+
+    <div class="grid cards-grid gap-3 ${hayCarrito ? 'mb-32' : 'mb-4'}">
+      ${productos.length ? productos.map(p => `
+        <button id="prod-${p.id}" onclick="agregarAlCarrito('${p.id}')" class="tap card p-4 flex flex-col items-center gap-1 relative">
+          ${carrito[p.id] ? `<span class="absolute -top-2 -right-2 bg-indigo-700 text-white text-sm font-bold w-7 h-7 rounded-full flex items-center justify-center">${carrito[p.id]}</span>` : ''}
+          <span class="text-4xl">${p.emoji}</span>
+          <span class="font-bold text-gray-800 text-center leading-tight">${p.nombre}</span>
+          ${detalleProducto(p) ? `<span class="text-gray-400 text-xs text-center leading-tight">${detalleProducto(p)}</span>` : ''}
+          <span class="text-indigo-700 font-extrabold">${money(p.precio)}</span>
+        </button>
+      `).join('') : `<div class="col-span-2 text-center text-gray-400 py-10">Sin productos. Agregalos en Stock 📦</div>`}
+    </div>
+  `}
+
+  ${hayCarrito ? `
+  <div class="fixed bottom-16 left-0 right-0 z-30">
+    <div class="max-w-lg mx-auto px-4">
+      <button onclick="abrirModalCobrar()" class="tap w-full bg-green-600 text-white font-extrabold text-xl py-4 rounded-2xl shadow-xl flex items-center justify-between px-6">
+        <span>🛒 ${cantidadTotal} producto${cantidadTotal===1?'':'s'}</span>
+        <span>${money(total)} →</span>
+      </button>
+    </div>
+  </div>` : ''}
+  `;
+}
+function tarjetaComboCaja(c){
+  return `
+  <button id="combo-${c.id}" onclick="agregarCombo('${c.id}')" class="tap card p-4 flex flex-col items-center gap-1 relative border-2 border-indigo-100">
+    ${carritoCombos[c.id] ? `<span class="absolute -top-2 -right-2 bg-indigo-700 text-white text-sm font-bold w-7 h-7 rounded-full flex items-center justify-center">${carritoCombos[c.id]}</span>` : ''}
+    <span class="text-4xl">${c.emoji}</span>
+    <span class="font-bold text-gray-800 text-center leading-tight">${c.nombre}</span>
+    <span class="text-indigo-700 font-extrabold">${money(c.precio)}</span>
+  </button>`;
+}
+
+function agregarAlCarrito(id, cantidad = 1){
+  carrito[id] = (carrito[id] || 0) + cantidad;
+  if(carrito[id] <= 0) delete carrito[id];
+  if(navigator.vibrate) navigator.vibrate(15);
+  renderApp();
+  const el = document.getElementById('prod-'+id);
+  if(el){ el.classList.add('bounce-add'); setTimeout(()=>el.classList.remove('bounce-add'), 280); }
+}
+
+function agregarCombo(id, cantidad = 1){
+  carritoCombos[id] = (carritoCombos[id] || 0) + cantidad;
+  if(carritoCombos[id] <= 0) delete carritoCombos[id];
+  if(navigator.vibrate) navigator.vibrate(15);
+  renderApp();
+  const el = document.getElementById('combo-'+id);
+  if(el){ el.classList.add('bounce-add'); setTimeout(()=>el.classList.remove('bounce-add'), 280); }
+}
+
+function escanearParaVender(){
+  iniciarEscaneo((codigo) => {
+    const producto = state.productos.find(p => p.codigoBarras === codigo);
+    if(producto){
+      agregarAlCarrito(producto.id, 1);
+      toast(`Agregado: ${producto.nombre}`, { icon:'📷' });
+    } else {
+      toast(`Código ${codigo} no encontrado`, { icon:'🤔', duracion:5000, acciones:[
+        { fn:`mostrarFormProducto(null, {codigoBarras:'${codigo}'})`, texto:'+ Cargar producto' }
+      ]});
+    }
+  });
+}
+
+function abrirModalCobrar(){
+  const items = Object.entries(carrito).filter(([,c])=>c>0).map(([id,c])=>({ p: state.productos.find(x=>x.id===id), c }));
+  const combosSel = Object.entries(carritoCombos).filter(([,c])=>c>0).map(([id,c])=>({ combo: state.combos.find(x=>x.id===id), c }));
+  const total = items.reduce((s,it)=>s+it.p.precio*it.c,0) + combosSel.reduce((s,it)=>s+it.combo.precio*it.c,0);
+  abrirModal(`
+    <div class="p-5">
+      <div class="text-xl font-extrabold text-gray-900 mb-4">Confirmar venta</div>
+      <div class="flex flex-col gap-3 max-h-56 overflow-y-auto mb-4">
+        ${items.map(it => `
+          <div class="flex items-center justify-between">
+            <span class="text-gray-700">${it.p.emoji} ${it.p.nombre}</span>
+            <div class="flex items-center gap-3">
+              <button onclick="agregarAlCarrito('${it.p.id}', -1); abrirModalCobrar();" class="tap w-9 h-9 rounded-full bg-gray-100 font-bold text-xl">−</button>
+              <span class="font-bold w-6 text-center">${it.c}</span>
+              <button onclick="agregarAlCarrito('${it.p.id}', 1); abrirModalCobrar();" class="tap w-9 h-9 rounded-full bg-gray-100 font-bold text-xl">+</button>
+            </div>
+          </div>`).join('')}
+        ${combosSel.map(it => `
+          <div class="flex items-center justify-between">
+            <span class="text-gray-700">${it.combo.emoji} ${it.combo.nombre}</span>
+            <div class="flex items-center gap-3">
+              <button onclick="agregarCombo('${it.combo.id}', -1); abrirModalCobrar();" class="tap w-9 h-9 rounded-full bg-gray-100 font-bold text-xl">−</button>
+              <span class="font-bold w-6 text-center">${it.c}</span>
+              <button onclick="agregarCombo('${it.combo.id}', 1); abrirModalCobrar();" class="tap w-9 h-9 rounded-full bg-gray-100 font-bold text-xl">+</button>
+            </div>
+          </div>`).join('')}
+      </div>
+      <div class="flex items-center justify-between text-2xl font-extrabold border-t pt-4 mb-5">
+        <span>Total</span><span class="text-green-600">${money(total)}</span>
+      </div>
+      <div class="text-gray-600 font-semibold mb-2">¿Cómo paga?</div>
+      <div class="grid grid-cols-3 gap-2 mb-2">
+        <button onclick="mostrarVueltoParaVenta(${total})" class="tap card py-4 flex flex-col items-center gap-1 border-2 border-transparent"><span class="text-2xl">💵</span><span class="text-sm font-bold">Efectivo</span></button>
+        <button onclick="confirmarVenta('transferencia')" class="tap card py-4 flex flex-col items-center gap-1 border-2 border-transparent"><span class="text-2xl">📲</span><span class="text-sm font-bold">Transfer.</span></button>
+        <button onclick="elegirClienteFiado()" class="tap card py-4 flex flex-col items-center gap-1 border-2 border-transparent"><span class="text-2xl">📒</span><span class="text-sm font-bold">Fiado</span></button>
+      </div>
+    </div>
+  `);
+}
+
+/* ---- Vuelto ---- */
+function mostrarVueltoParaVenta(total){
+  abrirModal(`
+    <div class="p-5">
+      <div class="text-xl font-extrabold text-gray-900 mb-1">Cobro en efectivo</div>
+      <div class="text-gray-400 mb-4">Total a cobrar: <span class="font-bold text-gray-700">${money(total)}</span></div>
+      <label class="font-semibold text-gray-600">¿Con cuánto te paga?</label>
+      <input id="vuelto-pago-venta" type="number" inputmode="decimal" placeholder="0" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2" oninput="actualizarVueltoVenta(${total})" />
+      <div class="grid grid-cols-4 gap-2 my-3">
+        ${[1000,2000,5000,10000].map(b=>`<button onclick="document.getElementById('vuelto-pago-venta').value=${b}; actualizarVueltoVenta(${total});" class="tap bg-gray-100 rounded-xl py-2 font-bold text-gray-700 text-sm">${money(b)}</button>`).join('')}
+      </div>
+      <button onclick="document.getElementById('vuelto-pago-venta').value=${total}; actualizarVueltoVenta(${total});" class="tap w-full bg-gray-100 text-gray-700 font-bold py-2.5 rounded-xl mb-3 text-sm">Pagó justo (sin vuelto)</button>
+      <div id="vuelto-resultado-venta" class="text-center py-3 mb-2"></div>
+      <button onclick="confirmarVenta('efectivo')" class="tap w-full bg-green-600 text-white font-extrabold py-4 rounded-2xl text-lg">Confirmar venta</button>
+    </div>
+  `);
+  actualizarVueltoVenta(total);
+}
+function actualizarVueltoVenta(total){
+  const pago = parseFloat(document.getElementById('vuelto-pago-venta').value) || 0;
+  const vuelto = pago - total;
+  const el = document.getElementById('vuelto-resultado-venta');
+  if(!el) return;
+  if(pago === 0){
+    el.innerHTML = `<div class="text-gray-400">Ingresá con cuánto paga</div>`;
+  } else if(vuelto < 0){
+    el.innerHTML = `<div class="text-red-600 font-bold text-lg">Todavía falta ${money(Math.abs(vuelto))}</div>`;
+  } else {
+    el.innerHTML = `<div class="section-label mb-1">Vuelto</div><div class="text-3xl font-extrabold text-green-600">${money(vuelto)}</div>`;
+  }
+}
+function mostrarCalculadoraVuelto(){
+  abrirModal(`
+    <div class="p-5">
+      <div class="text-xl font-extrabold text-gray-900 mb-4">🧮 Calculadora de vuelto</div>
+      <label class="font-semibold text-gray-600">Total de la compra</label>
+      <input id="vuelto-total" type="number" inputmode="decimal" placeholder="0" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2" oninput="actualizarVuelto()" />
+      <label class="font-semibold text-gray-600">¿Con cuánto te paga?</label>
+      <input id="vuelto-pago" type="number" inputmode="decimal" placeholder="0" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2" oninput="actualizarVuelto()" />
+      <div class="grid grid-cols-4 gap-2 my-3">
+        ${[1000,2000,5000,10000].map(b=>`<button onclick="document.getElementById('vuelto-pago').value=${b}; actualizarVuelto();" class="tap bg-gray-100 rounded-xl py-2 font-bold text-gray-700 text-sm">${money(b)}</button>`).join('')}
+      </div>
+      <div id="vuelto-resultado" class="text-center py-4"></div>
+    </div>
+  `);
+  actualizarVuelto();
+}
+function actualizarVuelto(){
+  const total = parseFloat(document.getElementById('vuelto-total').value) || 0;
+  const pago = parseFloat(document.getElementById('vuelto-pago').value) || 0;
+  const el = document.getElementById('vuelto-resultado');
+  if(!el) return;
+  if(pago === 0){
+    el.innerHTML = `<div class="text-gray-400">Ingresá los montos</div>`;
+    return;
+  }
+  const vuelto = pago - total;
+  if(vuelto < 0){
+    el.innerHTML = `<div class="text-red-600 font-bold text-xl">Falta ${money(Math.abs(vuelto))}</div>`;
+  } else {
+    el.innerHTML = `<div class="section-label mb-1">Vuelto</div><div class="text-4xl font-extrabold text-green-600">${money(vuelto)}</div>`;
+  }
+}
+
+function elegirClienteFiado(){
+  const items = Object.entries(carrito).filter(([,c])=>c>0);
+  const combosSel = Object.entries(carritoCombos).filter(([,c])=>c>0);
+  const total = items.reduce((s,[id,c]) => { const p = state.productos.find(x=>x.id===id); return s + p.precio*c; }, 0)
+              + combosSel.reduce((s,[id,c]) => { const cb = state.combos.find(x=>x.id===id); return s + cb.precio*c; }, 0);
+  abrirModal(`
+    <div class="p-5">
+      <div class="text-xl font-extrabold text-gray-900 mb-1">Fiar ${money(total)} a...</div>
+      <div class="text-gray-400 mb-4">Elegí el cliente o agregá uno nuevo</div>
+      <div class="flex flex-col gap-2 max-h-64 overflow-y-auto mb-4">
+        ${state.clientes.map(c => `
+          <button onclick="confirmarVenta('fiado','${c.id}')" class="tap card p-3 flex items-center justify-between text-left">
+            <span class="font-bold text-gray-800">👤 ${c.nombre}</span>
+            <span class="text-gray-400">${c.fiado>0?money(c.fiado)+' debe':''}</span>
+          </button>`).join('')}
+      </div>
+      <button onclick="mostrarFormNuevoClienteFiado()" class="tap w-full bg-indigo-700 text-white font-bold py-3 rounded-xl">+ Nuevo cliente</button>
+    </div>
+  `);
+}
+function mostrarFormNuevoClienteFiado(){
+  abrirModal(`
+    <div class="p-5">
+      <div class="text-xl font-extrabold text-gray-900 mb-4">Nuevo cliente</div>
+      <input id="nc-nombre" placeholder="Nombre" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg mb-3" />
+      <input id="nc-telefono" placeholder="WhatsApp (opcional)" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg mb-4" />
+      <button onclick="crearClienteYFiar()" class="tap w-full bg-indigo-700 text-white font-bold py-4 rounded-2xl text-lg">Guardar y fiar</button>
+    </div>
+  `);
+}
+function crearClienteYFiar(){
+  const nombre = document.getElementById('nc-nombre').value.trim();
+  if(!nombre){ toast('Escribí el nombre del cliente', {icon:'✍️'}); return; }
+  const telefono = document.getElementById('nc-telefono').value.trim();
+  const cliente = { id: uid(), nombre, telefono, fiado: 0 };
+  state.clientes.push(cliente);
+  confirmarVenta('fiado', cliente.id);
+}
+
+let ultimaVentaId = null;
+function confirmarVenta(metodo, clienteId = null){
+  const items = Object.entries(carrito).filter(([,c])=>c>0).map(([id,c])=>({ productoId:id, cantidad:c }));
+  const combosVendidos = Object.entries(carritoCombos).filter(([,c])=>c>0).map(([id,c])=>({ comboId:id, cantidad:c }));
+  if(!items.length && !combosVendidos.length) return;
+  let total = 0, ganancia = 0;
+  items.forEach(it => {
+    const p = state.productos.find(x=>x.id===it.productoId);
+    total += p.precio * it.cantidad;
+    ganancia += (p.precio - p.costo) * it.cantidad;
+    p.stock = Math.max(0, p.stock - it.cantidad);
+  });
+  combosVendidos.forEach(cv => {
+    const combo = state.combos.find(x=>x.id===cv.comboId);
+    if(!combo) return;
+    let costoCombo = 0;
+    combo.itemIds.forEach(ci => {
+      const p = state.productos.find(x=>x.id===ci.productoId);
+      if(!p) return;
+      costoCombo += p.costo * ci.cantidad;
+      p.stock = Math.max(0, p.stock - ci.cantidad * cv.cantidad);
+    });
+    total += combo.precio * cv.cantidad;
+    ganancia += (combo.precio - costoCombo) * cv.cantidad;
+  });
+  const venta = { id: uid(), fecha: Date.now(), items, combos: combosVendidos, total, ganancia, metodoPago: metodo, clienteId, vendedorId: state.usuarioActualId || '' };
+  state.ventas.push(venta);
+  if(metodo === 'fiado' && clienteId){
+    const cliente = state.clientes.find(c=>c.id===clienteId);
+    cliente.fiado = (cliente.fiado||0) + total;
+    state.fiadoMovimientos.push({ id: uid(), clienteId, tipo:'debe', monto: total, fecha: Date.now(), detalle: 'Compra fiada', ventaId: venta.id });
+  }
+  ultimaVentaId = venta.id;
+  guardar();
+  carrito = {};
+  carritoCombos = {};
+  cerrarModal();
+  ir('#/inicio');
+  renderApp();
+  toast(`¡Venta registrada! ${money(total)}`, { icon:'✅', acciones:[
+    { fn:'deshacerVenta()', texto:'Deshacer' },
+    { fn:`imprimirComprobante('${venta.id}')`, texto:'🖨️ Imprimir' }
+  ], duracion: 7000 });
+}
+function revertirVenta(venta){
+  venta.items.forEach(it => {
+    const p = state.productos.find(x=>x.id===it.productoId);
+    if(p) p.stock += it.cantidad;
+  });
+  (venta.combos||[]).forEach(cv => {
+    const combo = state.combos.find(x=>x.id===cv.comboId);
+    if(!combo) return;
+    combo.itemIds.forEach(ci => {
+      const p = state.productos.find(x=>x.id===ci.productoId);
+      if(p) p.stock += ci.cantidad * cv.cantidad;
+    });
+  });
+  if(venta.metodoPago === 'fiado' && venta.clienteId){
+    const cliente = state.clientes.find(c=>c.id===venta.clienteId);
+    if(cliente) cliente.fiado = Math.max(0,(cliente.fiado||0) - venta.total);
+    state.fiadoMovimientos = state.fiadoMovimientos.filter(m => m.ventaId !== venta.id);
+  }
+  state.ventas = state.ventas.filter(v=>v.id!==venta.id);
+}
+function deshacerVenta(){
+  const venta = state.ventas.find(v=>v.id===ultimaVentaId);
+  if(!venta) return;
+  revertirVenta(venta);
+  guardar();
+  renderApp();
+  toast('Venta deshecha', { icon:'↩️' });
+}
+
+/* ---- Reconocimiento de voz real (Web Speech API), gratis, sin claves ---- */
+function iniciarVoz(){
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const btn = document.getElementById('btn-voz');
+  if(!SR){
+    toast('Tu navegador no tiene micrófono disponible. Usá los productos de abajo 👇', { icon:'🎤', duracion:4500 });
+    return;
+  }
+  const rec = new SR();
+  rec.lang = 'es-AR';
+  rec.interimResults = false;
+  rec.maxAlternatives = 1;
+  if(btn){ btn.classList.add('pulse-mic'); btn.innerHTML = '🎙️ Escuchando...'; }
+  rec.onresult = (e) => {
+    const texto = e.results[0][0].transcript;
+    procesarTextoVoz(texto);
+  };
+  rec.onerror = () => {
+    toast('No te escuché bien, probá de nuevo o tocá un producto', { icon:'🎤' });
+  };
+  rec.onend = () => {
+    if(btn){ btn.classList.remove('pulse-mic'); btn.innerHTML = '🎤 Por voz'; }
+  };
+  rec.start();
+}
+
+const NUMEROS_TEXTO = { un:1, uno:1, una:1, dos:2, tres:3, cuatro:4, cinco:5, seis:6, siete:7, ocho:8, nueve:9, diez:10 };
+
+function procesarTextoVoz(textoOriginal){
+  const texto = textoOriginal.toLowerCase();
+  const palabras = texto.split(/\s+/);
+  let encontrados = [];
+
+  state.productos.forEach(p => {
+    const primeraPalabra = p.nombre.toLowerCase().split(' ')[0];
+    const singular = primeraPalabra.endsWith('es') ? primeraPalabra.slice(0,-2)
+      : primeraPalabra.endsWith('s') ? primeraPalabra.slice(0,-1)
+      : primeraPalabra;
+    let idx = -1;
+    palabras.forEach((w, i) => {
+      const wLimpia = w.replace(/[.,!?]/g,'');
+      // exige al menos 3 letras y que la palabra dicha empiece igual que el producto,
+      // para no confundir conectores cortos ("y", "un") con nombres de productos
+      if(idx === -1 && wLimpia.length >= 3 && singular.length >= 3 && (wLimpia === primeraPalabra || wLimpia.startsWith(singular))){
+        idx = i;
+      }
+    });
+    if(idx !== -1){
+      let cantidad = 1;
+      for(let j = Math.max(0, idx-2); j < idx; j++){
+        const w = palabras[j].replace(/[.,!?]/g,'');
+        if(/^\d+$/.test(w)) cantidad = parseInt(w);
+        else if(NUMEROS_TEXTO[w]) cantidad = NUMEROS_TEXTO[w];
+      }
+      encontrados.push({ producto: p, cantidad });
+    }
+  });
+
+  if(!encontrados.length){
+    toast(`Escuché "${textoOriginal}" pero no reconocí ningún producto. Probá tocando los productos.`, { icon:'🤔', duracion:4500 });
+    return;
+  }
+  encontrados.forEach(({producto, cantidad}) => agregarAlCarrito(producto.id, cantidad));
+  toast(`Agregué: ${encontrados.map(e=>e.cantidad+' '+e.producto.nombre).join(', ')}`, { icon:'🎤', duracion:4000 });
+}
+
+/* ====================== FIADO ====================== */
+function vistaFiado(){
+  const clientes = [...state.clientes].sort((a,b)=>(b.fiado||0)-(a.fiado||0));
+  const totalFiado = clientes.reduce((s,c)=>s+(c.fiado||0),0);
+  return `
+  <div class="card p-4 mt-2 mb-4 bg-amber-50">
+    <div class="text-amber-700 font-semibold">Total que te deben</div>
+    <div class="text-3xl font-extrabold text-amber-700">${money(totalFiado)}</div>
+  </div>
+
+  <button onclick="mostrarFormNuevoFiado()" class="tap w-full bg-indigo-700 text-white font-bold text-lg py-3.5 rounded-2xl mb-4">+ Anotar nuevo fiado</button>
+
+  ${clientes.length ? clientes.map(c => `
+    <div class="card p-4 mb-3">
+      <div class="flex items-center justify-between mb-3">
+        <div>
+          <div class="font-bold text-gray-800 text-lg">👤 ${c.nombre}</div>
+          <div class="text-gray-400 text-sm">${c.telefono || 'Sin teléfono'}</div>
+        </div>
+        <div class="text-xl font-extrabold ${c.fiado>0 ? 'text-red-600' : 'text-green-600'}">${money(c.fiado||0)}</div>
+      </div>
+      <div class="grid grid-cols-2 gap-2">
+        ${c.fiado>0 ? `<button onclick="registrarPagoFiado('${c.id}')" class="tap bg-green-50 text-green-700 font-bold py-2.5 rounded-xl">💵 Registrar pago</button>` : `<button disabled class="bg-gray-50 text-gray-300 font-bold py-2.5 rounded-xl">Sin deuda</button>`}
+        ${c.telefono ? `<a href="https://wa.me/${limpiarTelefono(c.telefono)}?text=${encodeURIComponent('Hola '+c.nombre+'! Te escribo de '+state.negocio.nombre+' para recordarte tu cuenta pendiente de '+money(c.fiado||0)+'. ¡Gracias!')}" target="_blank" class="tap bg-indigo-50 text-indigo-700 font-bold py-2.5 rounded-xl text-center">💬 Recordar</a>` : `<button onclick="toast('Este cliente no tiene teléfono cargado', {icon:'📵'})" class="bg-gray-50 text-gray-400 font-bold py-2.5 rounded-xl">💬 Recordar</button>`}
+      </div>
+    </div>
+  `).join('') : `
+  <div class="text-center py-16 text-gray-400">
+    <div class="text-5xl mb-3">📒</div>
+    <div class="font-semibold">Todavía no anotaste ningún fiado</div>
+  </div>`}
+  `;
+}
+function limpiarTelefono(t){ return (t||'').replace(/[^0-9]/g,''); }
+
+function mostrarFormNuevoFiado(){
+  abrirModal(`
+    <div class="p-5">
+      <div class="text-xl font-extrabold text-gray-900 mb-4">Anotar fiado</div>
+      <label class="font-semibold text-gray-600">Cliente</label>
+      <select id="nf-cliente" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2">
+        <option value="">-- Elegir cliente existente --</option>
+        ${state.clientes.map(c=>`<option value="${c.id}">${c.nombre}</option>`).join('')}
+      </select>
+      <div class="text-center text-gray-400 my-1">o</div>
+      <input id="nf-nombre-nuevo" placeholder="Nombre de cliente nuevo" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg mb-3" />
+      <label class="font-semibold text-gray-600">Monto</label>
+      <input id="nf-monto" type="number" inputmode="decimal" placeholder="0" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2" />
+      <input id="nf-detalle" placeholder="¿Qué se llevó? (opcional)" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg mb-4" />
+      <button onclick="guardarNuevoFiado()" class="tap w-full bg-indigo-700 text-white font-bold py-4 rounded-2xl text-lg">Guardar</button>
+    </div>
+  `);
+}
+function guardarNuevoFiado(){
+  const monto = parseFloat(document.getElementById('nf-monto').value);
+  if(!monto || monto <= 0){ toast('Poné un monto válido', {icon:'✍️'}); return; }
+  let clienteId = document.getElementById('nf-cliente').value;
+  const nombreNuevo = document.getElementById('nf-nombre-nuevo').value.trim();
+  if(!clienteId && nombreNuevo){
+    const c = { id: uid(), nombre: nombreNuevo, telefono:'', fiado:0 };
+    state.clientes.push(c);
+    clienteId = c.id;
+  }
+  if(!clienteId){ toast('Elegí o escribí un cliente', {icon:'👤'}); return; }
+  const cliente = state.clientes.find(c=>c.id===clienteId);
+  cliente.fiado = (cliente.fiado||0) + monto;
+  state.fiadoMovimientos.push({ id: uid(), clienteId, tipo:'debe', monto, fecha: Date.now(), detalle: document.getElementById('nf-detalle').value.trim() || 'Fiado' });
+  guardar();
+  cerrarModal();
+  renderApp();
+  toast(`Anotado: ${cliente.nombre} debe ${money(cliente.fiado)}`, { icon:'📒' });
+}
+function registrarPagoFiado(clienteId){
+  const cliente = state.clientes.find(c=>c.id===clienteId);
+  abrirModal(`
+    <div class="p-5">
+      <div class="text-xl font-extrabold text-gray-900 mb-1">Pago de ${cliente.nombre}</div>
+      <div class="text-gray-400 mb-4">Debe ${money(cliente.fiado)}</div>
+      <input id="pf-monto" type="number" inputmode="decimal" value="${cliente.fiado}" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg mb-4" />
+      <button onclick="confirmarPagoFiado('${clienteId}')" class="tap w-full bg-green-600 text-white font-bold py-4 rounded-2xl text-lg">Registrar pago</button>
+    </div>
+  `);
+}
+function confirmarPagoFiado(clienteId){
+  const monto = parseFloat(document.getElementById('pf-monto').value);
+  if(!monto || monto <= 0){ toast('Poné un monto válido', {icon:'✍️'}); return; }
+  const cliente = state.clientes.find(c=>c.id===clienteId);
+  cliente.fiado = Math.max(0, (cliente.fiado||0) - monto);
+  state.fiadoMovimientos.push({ id: uid(), clienteId, tipo:'pago', monto, fecha: Date.now(), detalle:'Pago recibido' });
+  guardar();
+  cerrarModal();
+  renderApp();
+  toast(`¡Pago registrado! ${cliente.nombre} ahora debe ${money(cliente.fiado)}`, { icon:'✅' });
+}
+
+/* ====================== STOCK ====================== */
+let filtroStock = 'todos';
+let busquedaStock = '';
+function vistaStock(){
+  const texto = busquedaStock.trim().toLowerCase();
+  let productos = state.productos.filter(p => !texto || p.nombre.toLowerCase().includes(texto) || (p.marca||'').toLowerCase().includes(texto) || (p.codigoBarras && p.codigoBarras.includes(texto)));
+
+  if(filtroStock === 'bajo'){
+    productos = productos.filter(p=>p.stock<=p.stockMin);
+    productos.sort((a,b)=> (a.stock/Math.max(1,a.stockMin)) - (b.stock/Math.max(1,b.stockMin)));
+  }
+
+  const vacio = `<div class="text-center py-16 text-gray-400">${texto ? 'No encontramos ningún producto con ese nombre' : 'Sin productos todavía'}</div>`;
+  let listaHTML;
+  if(filtroStock === 'bajo' || texto){
+    listaHTML = productos.map(tarjetaProductoStock).join('') || vacio;
+  } else {
+    const grupos = [
+      ...state.categorias.map(c => ({ id:c.id, nombre:c.nombre, productos: productos.filter(p=>p.categoriaId===c.id) })),
+      { id:'', nombre:'Sin categoría', productos: productos.filter(p=>!p.categoriaId) }
+    ].filter(g => g.productos.length);
+    const mostrarEncabezados = grupos.length > 1;
+    listaHTML = grupos.map(g => `
+      ${mostrarEncabezados ? `<div class="section-label mt-5 mb-2">${g.nombre} (${g.productos.length})</div>` : ''}
+      ${g.productos.map(tarjetaProductoStock).join('')}
+    `).join('') || vacio;
+  }
+
+  return `
+  <input id="input-busqueda-stock" type="text" value="${busquedaStock}" oninput="busquedaStock=this.value; renderApp();" placeholder="Buscar producto..."
+    class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg mt-2 mb-3 focus:border-indigo-600 focus:outline-none" />
+
+  <div class="flex gap-2 mb-3">
+    <button onclick="filtroStock='todos'; renderApp();" class="tap flex-1 py-2.5 rounded-xl font-bold ${filtroStock==='todos'?'bg-indigo-700 text-white':'bg-white text-gray-500'}">Todos (${productos.length})</button>
+    <button onclick="filtroStock='bajo'; renderApp();" class="tap flex-1 py-2.5 rounded-xl font-bold ${filtroStock==='bajo'?'bg-red-600 text-white':'bg-white text-gray-500'}">Por reponer (${state.productos.filter(p=>(!texto || p.nombre.toLowerCase().includes(texto) || (p.marca||'').toLowerCase().includes(texto)) && p.stock<=p.stockMin).length})</button>
+  </div>
+
+  <button onclick="mostrarFormProducto()" class="tap w-full bg-indigo-700 text-white font-bold text-lg py-3.5 rounded-2xl mb-2">+ Nuevo producto</button>
+  <div class="grid grid-cols-2 gap-2 mb-4">
+    <button onclick="mostrarCategorias()" class="tap bg-white text-gray-700 border-2 border-gray-200 font-bold text-lg py-3.5 rounded-2xl">📂 Categorías</button>
+    <button onclick="mostrarCombos()" class="tap bg-white text-gray-700 border-2 border-gray-200 font-bold text-lg py-3.5 rounded-2xl">🎁 Combos</button>
+  </div>
+
+  ${listaHTML}
+  `;
+}
+function tarjetaProductoStock(p){
+  const ratio = p.stock / Math.max(1,p.stockMin);
+  const color = ratio <= 1 ? 'bg-red-500' : ratio <= 2 ? 'bg-amber-400' : 'bg-green-500';
+  const est = !esRubroRopa() && p.vencimiento ? estadoVencimiento(p.vencimiento) : null;
+  const estTemp = esRubroRopa() ? estadoTemporadaProducto(p) : null;
+  const colVenc = est && est.color==='red' ? {bg:'#fef2f2', text:'#dc2626'} : {bg:'#fffbeb', text:'#b45309'};
+  const colTemp = estTemp && estTemp.color==='green' ? {bg:'#ecfdf5', text:'#059669'} : {bg:'#fffbeb', text:'#b45309'};
+  return `
+  <div class="card p-4 mb-3">
+    <div class="flex items-center justify-between mb-2">
+      <button onclick="mostrarFormProducto('${p.id}')" class="text-left flex items-center gap-3 flex-1 min-w-0">
+        <span class="text-2xl flex-shrink-0">${p.emoji}</span>
+        <span class="min-w-0">
+          <span class="font-bold text-gray-800 block truncate">${p.nombre}</span>
+          ${detalleProducto(p) ? `<span class="text-gray-400 text-sm block truncate">${detalleProducto(p)}</span>` : ''}
+        </span>
+      </button>
+      <span class="text-gray-400 text-sm whitespace-nowrap ml-2">${money(p.precio)}</span>
+    </div>
+    ${est && est.dias <= 30 ? `<div class="mb-2"><span class="badge-venc" style="background:${colVenc.bg};color:${colVenc.text};">${est.texto}</span></div>` : ''}
+    ${estTemp && estTemp.color==='amber' ? `<div class="mb-2"><span class="badge-venc" style="background:${colTemp.bg};color:${colTemp.text};">${estTemp.texto}</span></div>` : ''}
+    <div class="w-full h-2 bg-gray-100 rounded-full mb-2 overflow-hidden">
+      <div class="h-full ${color}" style="width:${Math.min(100, ratio*50)}%"></div>
+    </div>
+    <div class="flex items-center justify-between">
+      <span class="text-gray-500 font-semibold">Quedan: <span class="text-gray-900">${p.stock}</span></span>
+      <div class="flex items-center gap-2">
+        <button onclick="ajustarStock('${p.id}',-1)" class="tap w-10 h-10 rounded-full bg-gray-100 font-bold text-xl">−</button>
+        <button onclick="ajustarStock('${p.id}',1)" class="tap w-10 h-10 rounded-full bg-gray-100 font-bold text-xl">+</button>
+      </div>
+    </div>
+  </div>`;
+}
+function ajustarStock(id, delta){
+  const p = state.productos.find(x=>x.id===id);
+  p.stock = Math.max(0, p.stock + delta);
+  guardar();
+  renderApp();
+}
+
+/* ---- Categorías ---- */
+function mostrarCategorias(){
+  abrirModal(`
+    <div class="p-5">
+      <div class="text-xl font-extrabold text-gray-900 mb-4">Categorías</div>
+      <div class="flex gap-2 mb-4">
+        <input id="cat-nombre" placeholder="Ej: Gaseosas" class="flex-1 border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg" />
+        <button onclick="agregarCategoria()" class="tap bg-indigo-700 text-white font-bold px-6 rounded-2xl text-xl">+</button>
+      </div>
+      <div class="flex flex-col gap-2 max-h-80 overflow-y-auto">
+        ${state.categorias.length ? state.categorias.map(c => `
+          <div class="card p-3 flex items-center justify-between">
+            <span class="font-bold text-gray-800">${c.nombre}</span>
+            <div class="flex items-center gap-3">
+              <span class="text-gray-400 text-sm">${state.productos.filter(p=>p.categoriaId===c.id).length} productos</span>
+              <button onclick="eliminarCategoria('${c.id}')" class="tap text-red-500 text-xl">🗑️</button>
+            </div>
+          </div>`).join('') : `<div class="text-center text-gray-400 py-6">Todavía no creaste categorías</div>`}
+      </div>
+    </div>
+  `);
+}
+function agregarCategoria(){
+  const input = document.getElementById('cat-nombre');
+  const nombre = input.value.trim();
+  if(!nombre){ toast('Escribí un nombre para la categoría', {icon:'✍️'}); return; }
+  state.categorias.push({ id: uid(), nombre });
+  guardar();
+  mostrarCategorias();
+  toast(`Categoría "${nombre}" creada`, {icon:'📂'});
+}
+function eliminarCategoria(id){
+  confirmarAccion('¿Eliminar esta categoría? Los productos no se borran, solo quedan sin categoría.', () => {
+    state.productos.forEach(p => { if(p.categoriaId === id) p.categoriaId = ''; });
+    state.categorias = state.categorias.filter(c=>c.id!==id);
+    guardar();
+    mostrarCategorias();
+  });
+}
+
+/* ---- Combos ---- */
+let comboItemsTemp = {}; // productoId -> cantidad, mientras se arma/edita un combo
+function mostrarCombos(){
+  abrirModal(`
+    <div class="p-5">
+      <div class="text-xl font-extrabold text-gray-900 mb-4">Combos</div>
+      <button onclick="mostrarFormCombo()" class="tap w-full bg-indigo-700 text-white font-bold py-3.5 rounded-2xl mb-4">+ Nuevo combo</button>
+      <div class="flex flex-col gap-2 max-h-72 overflow-y-auto">
+        ${state.combos.length ? state.combos.map(c => `
+          <button onclick="mostrarFormCombo('${c.id}')" class="tap card p-3 flex items-center justify-between text-left">
+            <span class="font-bold text-gray-800">${c.emoji} ${c.nombre}</span>
+            <span class="text-gray-400 text-sm">${money(c.precio)}</span>
+          </button>`).join('') : `<div class="text-center text-gray-400 py-6">Todavía no creaste combos. Agrupá productos (ej: "Combo desayuno") a un precio especial.</div>`}
+      </div>
+    </div>
+  `);
+}
+function mostrarFormCombo(id = null){
+  const combo = id ? state.combos.find(x=>x.id===id) : null;
+  comboItemsTemp = {};
+  if(combo) combo.itemIds.forEach(ci => { comboItemsTemp[ci.productoId] = ci.cantidad; });
+  if(!state.productos.length){
+    abrirModal(`<div class="p-5 text-center text-gray-400 py-6">Primero cargá productos en Stock para poder armar un combo.</div>`);
+    return;
+  }
+  abrirModal(`
+    <div class="p-5">
+      <div class="text-xl font-extrabold text-gray-900 mb-4">${combo ? 'Editar combo' : 'Nuevo combo'}</div>
+      <div class="grid grid-cols-4 gap-2 mb-3">
+        <input id="cb-emoji" value="${combo?combo.emoji:'🎁'}" class="col-span-1 border-2 border-gray-200 rounded-2xl px-2 py-3 text-2xl text-center" />
+        <input id="cb-nombre" value="${combo?combo.nombre:''}" placeholder="Ej: Combo desayuno" class="col-span-3 border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg" />
+      </div>
+      <label class="font-semibold text-gray-600 block mb-2">¿Qué productos incluye?</label>
+      <div class="flex flex-col gap-2 max-h-60 overflow-y-auto mb-3">
+        ${state.productos.map(p => `
+          <div class="flex items-center justify-between card p-2.5">
+            <span class="text-gray-800 font-semibold flex items-center gap-2 min-w-0"><span>${p.emoji}</span><span class="truncate">${p.nombre}</span></span>
+            <div class="flex items-center gap-2 flex-shrink-0">
+              <button onclick="ajustarComboItem('${p.id}',-1)" class="tap w-8 h-8 rounded-full bg-gray-100 font-bold">−</button>
+              <span id="cb-cant-${p.id}" class="font-bold w-5 text-center">${comboItemsTemp[p.id]||0}</span>
+              <button onclick="ajustarComboItem('${p.id}',1)" class="tap w-8 h-8 rounded-full bg-gray-100 font-bold">+</button>
+            </div>
+          </div>`).join('')}
+      </div>
+      <div class="text-gray-500 text-sm mb-3" id="cb-resumen">${resumenComboTexto()}</div>
+      <label class="font-semibold text-gray-600">Precio de venta del combo</label>
+      <input id="cb-precio" type="number" inputmode="decimal" value="${combo?combo.precio:''}" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2 mb-4" />
+      <button onclick="guardarCombo('${id||''}')" class="tap w-full bg-indigo-700 text-white font-bold py-4 rounded-2xl text-lg mb-2">Guardar combo</button>
+      ${combo ? `<button onclick="eliminarCombo('${id}')" class="tap w-full text-red-600 font-bold py-3">Eliminar combo</button>` : ''}
+    </div>
+  `);
+}
+function resumenComboTexto(){
+  let costo = 0, sueltoPrecio = 0, cantTotal = 0;
+  Object.entries(comboItemsTemp).forEach(([pid,c]) => {
+    if(c<=0) return;
+    const p = state.productos.find(x=>x.id===pid);
+    if(!p) return;
+    costo += p.costo * c;
+    sueltoPrecio += p.precio * c;
+    cantTotal += c;
+  });
+  if(!cantTotal) return 'Elegí al menos un producto para el combo.';
+  return `Costo de estos productos: ${money(costo)} · Precio si los vendés sueltos: ${money(sueltoPrecio)}`;
+}
+function ajustarComboItem(productoId, delta){
+  comboItemsTemp[productoId] = Math.max(0, (comboItemsTemp[productoId]||0) + delta);
+  const span = document.getElementById('cb-cant-'+productoId);
+  if(span) span.textContent = comboItemsTemp[productoId];
+  const resumen = document.getElementById('cb-resumen');
+  if(resumen) resumen.textContent = resumenComboTexto();
+}
+function guardarCombo(id){
+  const nombre = document.getElementById('cb-nombre').value.trim();
+  const emoji = document.getElementById('cb-emoji').value.trim() || '🎁';
+  const precio = parseFloat(document.getElementById('cb-precio').value) || 0;
+  const itemIds = Object.entries(comboItemsTemp).filter(([,c])=>c>0).map(([productoId,cantidad])=>({productoId,cantidad}));
+  if(!nombre){ toast('Escribí el nombre del combo', {icon:'✍️'}); return; }
+  if(!itemIds.length){ toast('Elegí al menos un producto', {icon:'📦'}); return; }
+  if(id){
+    Object.assign(state.combos.find(c=>c.id===id), { nombre, emoji, precio, itemIds });
+  } else {
+    state.combos.push({ id: uid(), nombre, emoji, precio, itemIds });
+  }
+  guardar();
+  cerrarModal();
+  renderApp();
+  toast('Combo guardado', {icon:'✅'});
+}
+function eliminarCombo(id){
+  confirmarAccion('¿Eliminar este combo?', () => {
+    state.combos = state.combos.filter(c=>c.id!==id);
+    guardar();
+    cerrarModal();
+    renderApp();
+  });
+}
+
+const UNIDADES_PRESENTACION = ['unidades','ml','L','g','kg','m','par'];
+function mostrarFormProducto(id = null, override = null){
+  const p = id ? state.productos.find(x=>x.id===id) : null;
+  const v = { emoji:'🛒', nombre:'', marca:'', contenidoCantidad:1, contenidoUnidad:'unidades', categoriaId:'', proveedorId:'', precio:'', costo:'', stock:'', stockMin:5, vencimiento:'', temporada:'', codigoBarras:'', ...(p||{}), ...(override||{}) };
+  abrirModal(`
+    <div class="p-5">
+      <div class="text-xl font-extrabold text-gray-900 mb-4">${p ? 'Editar producto' : 'Nuevo producto'}</div>
+      <div class="grid grid-cols-4 gap-2 mb-3">
+        <input id="pf-emoji" value="${v.emoji}" class="col-span-1 border-2 border-gray-200 rounded-2xl px-2 py-3 text-2xl text-center" />
+        <input id="pf-nombre" value="${v.nombre}" placeholder="Nombre del producto" class="col-span-3 border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg" />
+      </div>
+      <label class="font-semibold text-gray-600">Marca (opcional)</label>
+      <input id="pf-marca" value="${v.marca}" placeholder="Ej: La Serenísima" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2" />
+      <label class="font-semibold text-gray-600">Presentación</label>
+      <div class="grid grid-cols-2 gap-2 my-2">
+        <input id="pf-contenido-cant" type="number" inputmode="decimal" value="${v.contenidoCantidad}" placeholder="Cantidad" class="border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg" />
+        <select id="pf-contenido-unidad" class="border-2 border-gray-200 rounded-2xl px-3 py-3 text-lg">
+          ${UNIDADES_PRESENTACION.map(u=>`<option value="${u}" ${v.contenidoUnidad===u?'selected':''}>${u}</option>`).join('')}
+        </select>
+      </div>
+      <label class="font-semibold text-gray-600">Categoría (opcional)</label>
+      <select id="pf-categoria" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2">
+        <option value="">Sin categoría</option>
+        ${state.categorias.map(c=>`<option value="${c.id}" ${v.categoriaId===c.id?'selected':''}>${c.nombre}</option>`).join('')}
+      </select>
+      <label class="font-semibold text-gray-600">Proveedor (opcional)</label>
+      <select id="pf-proveedor" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2">
+        <option value="">Sin proveedor</option>
+        ${state.proveedores.map(pr=>`<option value="${pr.id}" ${v.proveedorId===pr.id?'selected':''}>${pr.nombre}</option>`).join('')}
+      </select>
+      <label class="font-semibold text-gray-600">Código de barras (opcional)</label>
+      <div class="flex gap-2 my-2">
+        <input id="pf-codigo-barras" value="${v.codigoBarras}" placeholder="Escaneá o escribí el código" class="flex-1 border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg" />
+        <button onclick="escanearParaFormProducto('${id||''}')" class="tap bg-indigo-50 text-indigo-700 font-bold px-4 rounded-2xl text-xl">📷</button>
+      </div>
+      <label class="font-semibold text-gray-600">Precio de venta</label>
+      <input id="pf-precio" type="number" inputmode="decimal" value="${v.precio}" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2" />
+      <label class="font-semibold text-gray-600">Costo (lo que pagás vos)</label>
+      <input id="pf-costo" type="number" inputmode="decimal" value="${v.costo}" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2" />
+      <label class="font-semibold text-gray-600">Stock actual</label>
+      <input id="pf-stock" type="number" inputmode="numeric" value="${v.stock}" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2" />
+      <label class="font-semibold text-gray-600">Avisarme cuando quede menos de</label>
+      <input id="pf-stockmin" type="number" inputmode="numeric" value="${v.stockMin}" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2" />
+      ${esRubroRopa() ? `
+      <label class="font-semibold text-gray-600">Temporada (opcional)</label>
+      <select id="pf-temporada" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2 mb-4">
+        <option value="">Todo el año</option>
+        ${TEMPORADAS.map(t=>`<option value="${t}" ${v.temporada===t?'selected':''}>${t}</option>`).join('')}
+      </select>
+      ` : `
+      <label class="font-semibold text-gray-600">Fecha de vencimiento (opcional)</label>
+      <input id="pf-vencimiento" type="date" value="${v.vencimiento}" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2 mb-4" />
+      `}
+      <button onclick="guardarProducto('${id||''}')" class="tap w-full bg-indigo-700 text-white font-bold py-4 rounded-2xl text-lg mb-2">Guardar</button>
+      ${p ? `<button onclick="eliminarProducto('${id}')" class="tap w-full text-red-600 font-bold py-3">Eliminar producto</button>` : ''}
+    </div>
+  `);
+}
+function escanearParaFormProducto(id){
+  const valores = {
+    emoji: document.getElementById('pf-emoji').value,
+    nombre: document.getElementById('pf-nombre').value,
+    marca: document.getElementById('pf-marca').value,
+    contenidoCantidad: document.getElementById('pf-contenido-cant').value,
+    contenidoUnidad: document.getElementById('pf-contenido-unidad').value,
+    categoriaId: document.getElementById('pf-categoria').value,
+    proveedorId: document.getElementById('pf-proveedor').value,
+    precio: document.getElementById('pf-precio').value,
+    costo: document.getElementById('pf-costo').value,
+    stock: document.getElementById('pf-stock').value,
+    stockMin: document.getElementById('pf-stockmin').value,
+    vencimiento: document.getElementById('pf-vencimiento') ? document.getElementById('pf-vencimiento').value : '',
+    temporada: document.getElementById('pf-temporada') ? document.getElementById('pf-temporada').value : '',
+  };
+  iniciarEscaneo((codigo) => {
+    valores.codigoBarras = codigo;
+    mostrarFormProducto(id || null, valores);
+    toast('Código escaneado', { icon:'📷' });
+  });
+}
+function guardarProducto(id){
+  const nombre = document.getElementById('pf-nombre').value.trim();
+  const marca = document.getElementById('pf-marca').value.trim();
+  const contenidoCantidad = parseFloat(document.getElementById('pf-contenido-cant').value) || 1;
+  const contenidoUnidad = document.getElementById('pf-contenido-unidad').value;
+  const categoriaId = document.getElementById('pf-categoria').value;
+  const proveedorId = document.getElementById('pf-proveedor').value;
+  const codigoBarras = document.getElementById('pf-codigo-barras').value.trim();
+  const precio = parseFloat(document.getElementById('pf-precio').value) || 0;
+  const costo = parseFloat(document.getElementById('pf-costo').value) || 0;
+  const stock = parseInt(document.getElementById('pf-stock').value) || 0;
+  const stockMin = parseInt(document.getElementById('pf-stockmin').value) || 0;
+  const vencimiento = document.getElementById('pf-vencimiento') ? document.getElementById('pf-vencimiento').value || '' : '';
+  const temporada = document.getElementById('pf-temporada') ? document.getElementById('pf-temporada').value || '' : '';
+  const emoji = document.getElementById('pf-emoji').value.trim() || '🛒';
+  if(!nombre){ toast('Escribí el nombre del producto', {icon:'✍️'}); return; }
+  if(id){
+    const p = state.productos.find(x=>x.id===id);
+    Object.assign(p, { nombre, marca, contenidoCantidad, contenidoUnidad, categoriaId, proveedorId, codigoBarras, precio, costo, stock, stockMin, vencimiento, temporada, emoji });
+  } else {
+    state.productos.push({ id: uid(), nombre, marca, contenidoCantidad, contenidoUnidad, categoriaId, proveedorId, codigoBarras, precio, costo, stock, stockMin, vencimiento, temporada, emoji });
+  }
+  guardar();
+  cerrarModal();
+  renderApp();
+  toast('Producto guardado', {icon:'✅'});
+}
+function eliminarProducto(id){
+  confirmarAccion('¿Seguro que querés eliminar este producto?', () => {
+    state.productos = state.productos.filter(p=>p.id!==id);
+    guardar();
+    cerrarModal();
+    renderApp();
+  });
+}
+
+/* ====================== VENCIMIENTOS ====================== */
+let filtroVencimientos = 'urgentes';
+function vistaVencimientos(){
+  if(esRubroRopa()) return vistaTemporadas();
+  const conFecha = state.productos.filter(p => p.vencimiento);
+  const vencidos = conFecha.filter(p => estadoVencimiento(p.vencimiento).dias < 0);
+  const proximos7 = conFecha.filter(p => { const d = estadoVencimiento(p.vencimiento).dias; return d >= 0 && d <= 7; });
+  let lista = conFecha;
+  if(filtroVencimientos === 'urgentes') lista = [...vencidos, ...proximos7];
+  lista = [...lista].sort((a,b)=> estadoVencimiento(a.vencimiento).dias - estadoVencimiento(b.vencimiento).dias);
+
+  return `
+  <div class="card p-4 mt-2 mb-4">
+    <div class="section-label ${vencidos.length?'text-red-600':''}">Resumen</div>
+    <div class="text-lg font-bold ${vencidos.length?'text-red-600':'text-gray-800'} mt-1">
+      ${vencidos.length ? `${vencidos.length} producto${vencidos.length===1?'':'s'} vencido${vencidos.length===1?'':'s'}` : 'Sin productos vencidos'}
+      ${proximos7.length ? ` · ${proximos7.length} por vencer esta semana` : ''}
+    </div>
+  </div>
+
+  <div class="flex gap-2 mb-4">
+    <button onclick="filtroVencimientos='urgentes'; renderApp();" class="tap flex-1 py-2.5 rounded-xl font-bold text-sm ${filtroVencimientos==='urgentes'?'bg-indigo-700 text-white':'bg-white text-gray-500'}">Urgentes (${vencidos.length+proximos7.length})</button>
+    <button onclick="filtroVencimientos='todos'; renderApp();" class="tap flex-1 py-2.5 rounded-xl font-bold text-sm ${filtroVencimientos==='todos'?'bg-indigo-700 text-white':'bg-white text-gray-500'}">Con fecha (${conFecha.length})</button>
+  </div>
+
+  <button onclick="mostrarSelectorVencimiento()" class="tap w-full bg-indigo-700 text-white font-bold text-lg py-3.5 rounded-2xl mb-4">+ Cargar fecha de vencimiento</button>
+
+  ${lista.length ? lista.map(p => {
+    const est = estadoVencimiento(p.vencimiento);
+    const colores = est.color==='red' ? {bg:'#fef2f2', text:'#dc2626'} : est.color==='amber' ? {bg:'#fffbeb', text:'#b45309'} : {bg:'#ecfdf5', text:'#059669'};
+    return `
+    <div class="card p-4 mb-3">
+      <div class="flex items-center justify-between mb-2 gap-2">
+        <div class="flex items-center gap-2 min-w-0">
+          <span class="text-2xl flex-shrink-0">${p.emoji}</span>
+          <span class="min-w-0">
+            <span class="font-bold text-gray-800 block truncate">${p.nombre}</span>
+            ${detalleProducto(p) ? `<span class="text-gray-400 text-sm block truncate">${detalleProducto(p)}</span>` : ''}
+          </span>
+        </div>
+        <span class="badge-venc whitespace-nowrap" style="background:${colores.bg};color:${colores.text};">${est.texto}</span>
+      </div>
+      <button onclick="mostrarFormProducto('${p.id}')" class="tap w-full bg-gray-50 text-gray-700 font-bold py-2.5 rounded-xl text-sm">Actualizar fecha</button>
+    </div>`;
+  }).join('') : `
+  <div class="text-center py-16 text-gray-400">
+    <div class="text-5xl mb-3">⏳</div>
+    <div class="font-semibold">${filtroVencimientos==='urgentes' ? 'No hay nada urgente, todo en orden' : 'Todavía no cargaste fechas de vencimiento'}</div>
+  </div>`}
+  `;
+}
+function vistaTemporadas(){
+  const actual = temporadaActual();
+  const conTemporada = state.productos.filter(p => p.temporada);
+  const fueraDeTemporada = conTemporada.filter(p => p.temporada !== actual);
+  return `
+  <div class="card p-4 mt-2 mb-4">
+    <div class="section-label">Temporada actual</div>
+    <div class="text-lg font-bold text-gray-800 mt-1">☀️ ${actual}</div>
+  </div>
+
+  <button onclick="mostrarSelectorTemporada()" class="tap w-full bg-indigo-700 text-white font-bold text-lg py-3.5 rounded-2xl mb-4">+ Asignar temporada a un producto</button>
+
+  ${fueraDeTemporada.length ? `
+  <div class="section-label mb-2">Fuera de temporada (${fueraDeTemporada.length})</div>
+  ${fueraDeTemporada.map(p => `
+    <div class="card p-4 mb-3">
+      <div class="flex items-center justify-between mb-2 gap-2">
+        <div class="flex items-center gap-2 min-w-0">
+          <span class="text-2xl flex-shrink-0">${p.emoji}</span>
+          <span class="min-w-0">
+            <span class="font-bold text-gray-800 block truncate">${p.nombre}</span>
+            ${detalleProducto(p) ? `<span class="text-gray-400 text-sm block truncate">${detalleProducto(p)}</span>` : ''}
+          </span>
+        </div>
+        <span class="badge-venc whitespace-nowrap" style="background:#fffbeb;color:#b45309;">${p.temporada}</span>
+      </div>
+      <button onclick="mostrarFormProducto('${p.id}')" class="tap w-full bg-gray-50 text-gray-700 font-bold py-2.5 rounded-xl text-sm">Actualizar temporada</button>
+    </div>`).join('')}
+  ` : `
+  <div class="text-center py-16 text-gray-400">
+    <div class="text-5xl mb-3">☀️</div>
+    <div class="font-semibold">Todo tu stock está en temporada</div>
+  </div>`}
+  `;
+}
+function mostrarSelectorTemporada(){
+  abrirModal(`
+    <div class="p-5">
+      <div class="text-xl font-extrabold text-gray-900 mb-1">Asignar temporada</div>
+      <div class="text-gray-400 mb-4">Elegí el producto al que le querés poner o actualizar la temporada</div>
+      <div class="flex flex-col gap-2 max-h-80 overflow-y-auto">
+        ${state.productos.length ? state.productos.map(p => `
+          <button onclick="cerrarModal(); mostrarFormProducto('${p.id}');" class="tap card p-3 flex items-center justify-between text-left gap-2">
+            <span class="flex items-center gap-2 min-w-0">
+              <span class="text-xl flex-shrink-0">${p.emoji}</span>
+              <span class="font-bold text-gray-800 truncate">${p.nombre}</span>
+            </span>
+            <span class="text-gray-400 text-sm whitespace-nowrap">${p.temporada || 'Sin temporada'}</span>
+          </button>`).join('') : `<div class="text-center text-gray-400 py-6">Todavía no cargaste productos</div>`}
+      </div>
+    </div>
+  `);
+}
+function mostrarSelectorVencimiento(){
+  abrirModal(`
+    <div class="p-5">
+      <div class="text-xl font-extrabold text-gray-900 mb-1">Cargar vencimiento</div>
+      <div class="text-gray-400 mb-4">Elegí el producto al que le querés poner o actualizar la fecha</div>
+      <div class="flex flex-col gap-2 max-h-80 overflow-y-auto">
+        ${state.productos.length ? state.productos.map(p => `
+          <button onclick="cerrarModal(); mostrarFormProducto('${p.id}');" class="tap card p-3 flex items-center justify-between text-left gap-2">
+            <span class="flex items-center gap-2 min-w-0">
+              <span class="text-xl flex-shrink-0">${p.emoji}</span>
+              <span class="font-bold text-gray-800 truncate">${p.nombre}</span>
+            </span>
+            <span class="text-gray-400 text-sm whitespace-nowrap">${p.vencimiento ? formatearFechaCorta(p.vencimiento) : 'Sin fecha'}</span>
+          </button>`).join('') : `<div class="text-center text-gray-400 py-6">Todavía no cargaste productos</div>`}
+      </div>
+    </div>
+  `);
+}
+
+/* ====================== CIERRE DE CAJA ====================== */
+let cierreFondoInicial = 0;
+let cierreContado = null;
+function vistaCierre(){
+  if(!usuarioEsAdmin()){
+    return `
+    <div class="text-center py-20 text-gray-400">
+      <div class="text-5xl mb-3">🔒</div>
+      <div class="font-semibold text-gray-600">El cierre de caja es solo para el administrador.</div>
+      <div class="text-sm mt-1">Pedile a un administrador que lo haga.</div>
+    </div>`;
+  }
+  const hoy = inicioDeHoy();
+  const eliminacionesHoy = state.eliminaciones.filter(e=>e.fecha>=hoy);
+  const ventasHoy = state.ventas.filter(v=>v.fecha>=hoy);
+  const efectivoVentas = ventasHoy.filter(v=>v.metodoPago==='efectivo').reduce((s,v)=>s+v.total,0);
+  const transferenciaVentas = ventasHoy.filter(v=>v.metodoPago==='transferencia').reduce((s,v)=>s+v.total,0);
+  const fiadoVentas = ventasHoy.filter(v=>v.metodoPago==='fiado').reduce((s,v)=>s+v.total,0);
+  const pagosFiadoHoy = state.fiadoMovimientos.filter(m=>m.tipo==='pago' && m.fecha>=hoy).reduce((s,m)=>s+m.monto,0);
+  const efectivoEsperado = cierreFondoInicial + efectivoVentas + pagosFiadoHoy;
+  const diferencia = cierreContado !== null ? cierreContado - efectivoEsperado : null;
+
+  return `
+  <div class="card p-4 mt-2 mb-4">
+    <div class="section-label mb-2">Movimientos de hoy</div>
+    <div class="flex flex-col gap-2">
+      <div class="flex justify-between text-gray-700"><span>💵 Ventas en efectivo</span><span class="font-bold">${money(efectivoVentas)}</span></div>
+      <div class="flex justify-between text-gray-700"><span>📲 Transferencias</span><span class="font-bold">${money(transferenciaVentas)}</span></div>
+      <div class="flex justify-between text-gray-700"><span>📒 Ventas fiadas</span><span class="font-bold">${money(fiadoVentas)}</span></div>
+      <div class="flex justify-between text-gray-700"><span>💰 Cobros de fiado</span><span class="font-bold">${money(pagosFiadoHoy)}</span></div>
+    </div>
+  </div>
+
+  <div class="card p-4 mb-4">
+    <label class="font-semibold text-gray-600">¿Con cuánto efectivo abriste la caja hoy?</label>
+    <input id="cierre-fondo" type="number" inputmode="decimal" value="${cierreFondoInicial||''}" placeholder="0" oninput="cierreFondoInicial=parseFloat(this.value)||0; renderApp();" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2" />
+    <div class="flex items-center justify-between mt-3 pt-3 border-t">
+      <span class="font-bold text-gray-700">Efectivo esperado</span>
+      <span class="text-2xl font-extrabold text-indigo-700">${money(efectivoEsperado)}</span>
+    </div>
+  </div>
+
+  <div class="card p-4 mb-4">
+    <label class="font-semibold text-gray-600">Contá el efectivo real que tenés y escribilo acá</label>
+    <input id="cierre-contado" type="number" inputmode="decimal" placeholder="0" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2" />
+    <button onclick="calcularCierre()" class="tap w-full bg-indigo-700 text-white font-bold py-3.5 rounded-2xl mt-2">Calcular diferencia</button>
+  </div>
+
+  ${cierreContado !== null ? `
+  <div class="card p-4 mb-4 text-center">
+    <div class="text-4xl mb-2">${diferencia===0?'✅':diferencia>0?'🤔':'⚠️'}</div>
+    <div class="text-lg font-bold ${diferencia===0?'text-green-600':diferencia>0?'text-amber-600':'text-red-600'}">
+      ${diferencia===0?'¡Perfecto, cuadra!':diferencia>0?`Sobran ${money(diferencia)}`:`Faltan ${money(Math.abs(diferencia))}`}
+    </div>
+    <button onclick="guardarCierre()" class="tap w-full bg-gray-100 text-gray-700 font-bold py-3 rounded-2xl mt-3">💾 Guardar este cierre</button>
+  </div>` : ''}
+
+  ${state.cierres.length ? `
+  <div class="section-label mb-2 mt-2">Historial de cierres</div>
+  ${[...state.cierres].sort((a,b)=>b.fecha-a.fecha).slice(0,7).map(c => `
+    <div class="card p-3 mb-2 flex items-center justify-between">
+      <span class="text-gray-700 font-semibold">${new Date(c.fecha).toLocaleDateString('es-AR')}</span>
+      <span class="font-bold ${c.diferencia===0?'text-green-600':c.diferencia>0?'text-amber-600':'text-red-600'}">${c.diferencia===0?'Cuadró':c.diferencia>0?'Sobró '+money(c.diferencia):'Faltó '+money(Math.abs(c.diferencia))}</span>
+    </div>
+  `).join('')}` : ''}
+
+  ${eliminacionesHoy.length ? `
+  <div class="section-label mb-2 mt-4 text-red-600">🗑️ Ventas eliminadas hoy</div>
+  ${eliminacionesHoy.map(e => `
+    <div class="card p-3 mb-2">
+      <div class="flex items-center justify-between">
+        <span class="text-gray-700 font-semibold">${e.quienNombre}</span>
+        <span class="font-bold text-red-600">${money(e.monto)}</span>
+      </div>
+      <div class="text-gray-400 text-sm">${fechaHora(e.fecha)} · venta original del ${fechaHora(e.ventaFecha)}</div>
+    </div>
+  `).join('')}` : ''}
+  `;
+}
+function calcularCierre(){
+  const val = parseFloat(document.getElementById('cierre-contado').value);
+  cierreContado = isNaN(val) ? 0 : val;
+  renderApp();
+}
+function guardarCierre(){
+  const hoy = inicioDeHoy();
+  const ventasHoy = state.ventas.filter(v=>v.fecha>=hoy);
+  const efectivoVentas = ventasHoy.filter(v=>v.metodoPago==='efectivo').reduce((s,v)=>s+v.total,0);
+  const pagosFiadoHoy = state.fiadoMovimientos.filter(m=>m.tipo==='pago' && m.fecha>=hoy).reduce((s,m)=>s+m.monto,0);
+  const efectivoEsperado = cierreFondoInicial + efectivoVentas + pagosFiadoHoy;
+  const diferencia = cierreContado - efectivoEsperado;
+  state.cierres.push({ id: uid(), fecha: Date.now(), fondoInicial: cierreFondoInicial, esperado: efectivoEsperado, contado: cierreContado, diferencia });
+  guardar();
+  cierreContado = null;
+  cierreFondoInicial = 0;
+  renderApp();
+  toast('Cierre guardado', {icon:'💾'});
+}
+
+/* ====================== GASTOS DEL NEGOCIO ====================== */
+const GASTO_CATEGORIAS = [
+  { id:'alquiler', emoji:'🏠', nombre:'Alquiler' },
+  { id:'sueldos', emoji:'👥', nombre:'Sueldos' },
+  { id:'servicios', emoji:'💡', nombre:'Servicios' },
+  { id:'impuestos', emoji:'📋', nombre:'Impuestos' },
+  { id:'otros', emoji:'🧾', nombre:'Otros' },
+];
+function iconoGasto(categoriaId){ return (GASTO_CATEGORIAS.find(c=>c.id===categoriaId)||{}).emoji || '🧾'; }
+function nombreCategoriaGasto(categoriaId){ return (GASTO_CATEGORIAS.find(c=>c.id===categoriaId)||{}).nombre || 'Otros'; }
+function gastosPeriodoActual(){
+  if(filtroPeriodoReportes !== 'mes') return state.gastos;
+  const hoy = new Date();
+  const inicioMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1).getTime();
+  return state.gastos.filter(g => g.fecha >= inicioMes);
+}
+function vistaGastos(){
+  const hoyD = new Date();
+  const inicioMes = new Date(hoyD.getFullYear(), hoyD.getMonth(), 1).getTime();
+  const gastosMes = state.gastos.filter(g => g.fecha >= inicioMes);
+  const totalMes = gastosMes.reduce((s,g)=>s+g.monto,0);
+  const gastosOrdenados = [...state.gastos].sort((a,b)=>b.fecha-a.fecha);
+
+  return `
+  <div class="card p-4 mt-2 mb-4 bg-red-50">
+    <div class="text-red-700 font-semibold">Gastos de este mes</div>
+    <div class="text-3xl font-extrabold text-red-700">${money(totalMes)}</div>
+  </div>
+
+  <button onclick="mostrarFormGasto()" class="tap w-full bg-indigo-700 text-white font-bold text-lg py-3.5 rounded-2xl mb-4">+ Nuevo gasto</button>
+
+  ${gastosOrdenados.length ? gastosOrdenados.map(g => `
+    <button onclick="mostrarFormGasto('${g.id}')" class="tap card p-4 mb-3 w-full flex items-center justify-between text-left">
+      <div class="flex items-center gap-3 min-w-0">
+        <span class="text-2xl flex-shrink-0">${iconoGasto(g.categoria)}</span>
+        <span class="min-w-0">
+          <span class="font-bold text-gray-800 block truncate">${nombreCategoriaGasto(g.categoria)}</span>
+          <span class="text-gray-400 text-sm block truncate">${g.descripcion || fechaHora(g.fecha)}</span>
+        </span>
+      </div>
+      <span class="font-extrabold text-red-600 whitespace-nowrap ml-2">${money(g.monto)}</span>
+    </button>
+  `).join('') : `<div class="text-center py-16 text-gray-400"><div class="text-5xl mb-3">🧾</div>Todavía no anotaste gastos</div>`}
+  `;
+}
+function mostrarFormGasto(id = null){
+  const g = id ? state.gastos.find(x=>x.id===id) : null;
+  const fechaDefault = g ? new Date(g.fecha).toISOString().slice(0,10) : new Date().toISOString().slice(0,10);
+  abrirModal(`
+    <div class="p-5">
+      <div class="text-xl font-extrabold text-gray-900 mb-4">${g ? 'Editar gasto' : 'Nuevo gasto'}</div>
+      <label class="font-semibold text-gray-600">Categoría</label>
+      <select id="gf-categoria" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2">
+        ${GASTO_CATEGORIAS.map(c=>`<option value="${c.id}" ${g&&g.categoria===c.id?'selected':''}>${c.emoji} ${c.nombre}</option>`).join('')}
+      </select>
+      <label class="font-semibold text-gray-600">Descripción (opcional)</label>
+      <input id="gf-descripcion" value="${g?g.descripcion:''}" placeholder="Ej: Factura de luz agosto" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2" />
+      <label class="font-semibold text-gray-600">Monto</label>
+      <input id="gf-monto" type="number" inputmode="decimal" value="${g?g.monto:''}" placeholder="0" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2" />
+      <label class="font-semibold text-gray-600">Fecha</label>
+      <input id="gf-fecha" type="date" value="${fechaDefault}" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2 mb-4" />
+      <button onclick="guardarGasto('${id||''}')" class="tap w-full bg-indigo-700 text-white font-bold py-4 rounded-2xl text-lg mb-2">Guardar</button>
+      ${g ? `<button onclick="eliminarGasto('${id}')" class="tap w-full text-red-600 font-bold py-3">Eliminar gasto</button>` : ''}
+    </div>
+  `);
+}
+function guardarGasto(id){
+  const categoria = document.getElementById('gf-categoria').value;
+  const descripcion = document.getElementById('gf-descripcion').value.trim();
+  const monto = parseFloat(document.getElementById('gf-monto').value) || 0;
+  const fechaStr = document.getElementById('gf-fecha').value;
+  if(!monto || monto <= 0){ toast('Poné un monto válido', {icon:'✍️'}); return; }
+  const fecha = fechaStr ? new Date(fechaStr + 'T12:00:00').getTime() : Date.now();
+  if(id){
+    Object.assign(state.gastos.find(x=>x.id===id), { categoria, descripcion, monto, fecha });
+  } else {
+    state.gastos.push({ id: uid(), categoria, descripcion, monto, fecha });
+  }
+  guardar();
+  cerrarModal();
+  renderApp();
+  toast('Gasto guardado', {icon:'✅'});
+}
+function eliminarGasto(id){
+  confirmarAccion('¿Eliminar este gasto?', () => {
+    state.gastos = state.gastos.filter(x=>x.id!==id);
+    guardar();
+    cerrarModal();
+    renderApp();
+  });
+}
+
+/* ====================== PROVEEDORES ====================== */
+function vistaProveedores(){
+  return `
+  <button onclick="mostrarFormProveedor()" class="tap w-full bg-indigo-700 text-white font-bold text-lg py-3.5 rounded-2xl mt-2 mb-4">+ Nuevo proveedor</button>
+  ${state.proveedores.length ? state.proveedores.map(prov => {
+    const productosProv = state.productos.filter(p=>p.proveedorId===prov.id);
+    const bajoStockProv = productosProv.filter(p=>p.stock<=p.stockMin);
+    return `
+    <div class="card p-4 mb-3">
+      <div class="flex items-center justify-between mb-2 gap-2">
+        <button onclick="mostrarFormProveedor('${prov.id}')" class="text-left flex-1 min-w-0">
+          <div class="font-bold text-gray-800 text-lg truncate">🚚 ${prov.nombre}</div>
+          <div class="text-gray-400 text-sm">${prov.telefono || 'Sin teléfono'}</div>
+        </button>
+        ${bajoStockProv.length ? `<span class="badge-venc whitespace-nowrap" style="background:#fef2f2;color:#dc2626;">${bajoStockProv.length} por pedir</span>` : ''}
+      </div>
+      ${bajoStockProv.length ? `
+        <div class="flex flex-col gap-1 mb-3">
+          ${bajoStockProv.map(p=>`<div class="flex items-center justify-between text-gray-600 text-sm"><span>${p.emoji} ${p.nombre}</span><span>Quedan ${p.stock}</span></div>`).join('')}
+        </div>
+        ${prov.telefono ? `<button onclick="pedirReposicion('${prov.id}')" class="tap w-full bg-green-50 text-green-700 font-bold py-2.5 rounded-xl">📤 Pedir reposición por WhatsApp</button>` : `<div class="text-amber-600 text-sm">Agregale un teléfono para poder pedirle por WhatsApp</div>`}
+      ` : prov.telefono ? `<a href="https://wa.me/${limpiarTelefono(prov.telefono)}" target="_blank" class="tap w-full bg-indigo-50 text-indigo-700 font-bold py-2.5 rounded-xl text-center block">💬 Contactar</a>` : ''}
+    </div>`;
+  }).join('') : `<div class="text-center py-16 text-gray-400"><div class="text-5xl mb-3">🚚</div>Todavía no cargaste proveedores</div>`}
+  `;
+}
+function mostrarFormProveedor(id = null){
+  const prov = id ? state.proveedores.find(x=>x.id===id) : null;
+  abrirModal(`
+    <div class="p-5">
+      <div class="text-xl font-extrabold text-gray-900 mb-4">${prov ? 'Editar proveedor' : 'Nuevo proveedor'}</div>
+      <input id="prov-nombre" value="${prov?prov.nombre:''}" placeholder="Ej: Distribuidora Coca-Cola" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg mb-3" />
+      <input id="prov-telefono" value="${prov?prov.telefono:''}" placeholder="WhatsApp (opcional)" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg mb-4" />
+      <button onclick="guardarProveedor('${id||''}')" class="tap w-full bg-indigo-700 text-white font-bold py-4 rounded-2xl text-lg mb-2">Guardar</button>
+      ${prov ? `<button onclick="eliminarProveedor('${id}')" class="tap w-full text-red-600 font-bold py-3">Eliminar proveedor</button>` : ''}
+    </div>
+  `);
+}
+function guardarProveedor(id){
+  const nombre = document.getElementById('prov-nombre').value.trim();
+  const telefono = document.getElementById('prov-telefono').value.trim();
+  if(!nombre){ toast('Escribí el nombre del proveedor', {icon:'✍️'}); return; }
+  if(id){
+    Object.assign(state.proveedores.find(x=>x.id===id), { nombre, telefono });
+  } else {
+    state.proveedores.push({ id: uid(), nombre, telefono });
+  }
+  guardar();
+  cerrarModal();
+  renderApp();
+  toast('Proveedor guardado', {icon:'✅'});
+}
+function eliminarProveedor(id){
+  confirmarAccion('¿Eliminar este proveedor? Los productos no se borran, solo quedan sin proveedor asignado.', () => {
+    state.productos.forEach(p => { if(p.proveedorId === id) p.proveedorId = ''; });
+    state.proveedores = state.proveedores.filter(x=>x.id!==id);
+    guardar();
+    cerrarModal();
+    renderApp();
+  });
+}
+function pedirReposicion(proveedorId){
+  const prov = state.proveedores.find(x=>x.id===proveedorId);
+  const productos = state.productos.filter(p=>p.proveedorId===proveedorId && p.stock<=p.stockMin);
+  if(!productos.length){ toast('No hay productos de este proveedor por reponer', {icon:'✅'}); return; }
+  const lineas = productos.map(p => `- ${p.nombre}${detalleProducto(p)?' ('+detalleProducto(p)+')':''}`).join('\n');
+  const msg = `Hola! Soy de ${state.negocio.nombre}. Necesito reponer:\n${lineas}\n\n¡Gracias!`;
+  window.open(`https://wa.me/${limpiarTelefono(prov.telefono)}?text=${encodeURIComponent(msg)}`, '_blank');
+}
+
+/* ====================== MÁS (menú) ====================== */
+function vistaMas(){
+  const urgentes = esRubroRopa()
+    ? state.productos.filter(p => p.temporada && p.temporada !== temporadaActual()).length
+    : state.productos.filter(p => p.vencimiento && estadoVencimiento(p.vencimiento).dias <= 7).length;
+  const porPedir = state.proveedores.filter(prov => state.productos.some(p=>p.proveedorId===prov.id && p.stock<=p.stockMin)).length;
+  return `
+  <div class="grid cards-grid gap-3 mt-2">
+    ${esRubroRopa() ? accesoMas('#/vencimientos','🌦️','Temporadas', urgentes) : accesoMas('#/vencimientos','⏳','Vencimientos', urgentes)}
+    ${accesoMas('#/cierre','🧮','Cierre de caja')}
+    ${accesoMas('#/proveedores','🚚','Proveedores', porPedir)}
+    ${accesoMas('#/gastos','🧾','Gastos')}
+    ${accesoAccion('mostrarCalculadoraVuelto()','💵','Vuelto')}
+    ${accesoMas('#/clientes','👥','Clientes')}
+    ${accesoMas('#/reportes','📊','Reportes')}
+    ${accesoMas('#/stock','📦','Productos')}
+    ${accesoMas('#/config','⚙️','Configuración')}
+  </div>
+
+  <div class="card p-4 mt-4">
+    <div class="font-bold text-gray-800 text-lg mb-1">⭐ Pedí reseñas en Google</div>
+    <div class="text-gray-500 mb-3">Mandale a un cliente contento un mensaje para que te deje una reseña. Ayuda muchísimo a que te encuentren.</div>
+    <button onclick="mostrarPedirResena()" class="tap w-full bg-amber-500 text-white font-bold py-3 rounded-xl">Pedir una reseña</button>
+  </div>
+  `;
+}
+function accesoAccion(onclick, emoji, label){
+  return `<button onclick="${onclick}" class="tap card p-6 flex flex-col items-center gap-2">
+    <span class="text-3xl">${emoji}</span>
+    <span class="font-bold text-gray-800">${label}</span>
+  </button>`;
+}
+function accesoMas(ruta, emoji, label, badge){
+  return `<button onclick="ir('${ruta}')" class="tap card p-6 flex flex-col items-center gap-2 relative">
+    ${badge ? `<span class="absolute top-3 right-3 bg-red-600 text-white text-xs font-bold w-6 h-6 rounded-full flex items-center justify-center">${badge}</span>` : ''}
+    <span class="text-3xl">${emoji}</span>
+    <span class="font-bold text-gray-800">${label}</span>
+  </button>`;
+}
+function mostrarPedirResena(){
+  abrirModal(`
+    <div class="p-5">
+      <div class="text-xl font-extrabold text-gray-900 mb-4">Pedir reseña</div>
+      <label class="font-semibold text-gray-600">Elegí un cliente</label>
+      <select id="res-cliente" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2">
+        <option value="">-- Elegir --</option>
+        ${state.clientes.filter(c=>c.telefono).map(c=>`<option value="${c.id}">${c.nombre}</option>`).join('')}
+      </select>
+      <div class="text-center text-gray-400 my-1">o</div>
+      <input id="res-telefono" placeholder="Número de WhatsApp" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg mb-4" />
+      <button onclick="enviarPedidoResena()" class="tap w-full bg-amber-500 text-white font-bold py-4 rounded-2xl text-lg">Abrir WhatsApp</button>
+    </div>
+  `);
+}
+function enviarPedidoResena(){
+  const clienteId = document.getElementById('res-cliente').value;
+  let telefono = document.getElementById('res-telefono').value.trim();
+  let nombre = 'de nuevo';
+  if(clienteId){
+    const c = state.clientes.find(x=>x.id===clienteId);
+    telefono = c.telefono; nombre = c.nombre;
+  }
+  if(!telefono){ toast('Elegí un cliente o escribí un teléfono', {icon:'📵'}); return; }
+  const msg = `¡Hola ${nombre}! Somos ${state.negocio.nombre}. Si te gustó tu compra, nos ayudaría muchísimo que nos dejes una reseña en Google. ¡Gracias! 🙏`;
+  window.open(`https://wa.me/${limpiarTelefono(telefono)}?text=${encodeURIComponent(msg)}`, '_blank');
+  cerrarModal();
+}
+
+/* ====================== CLIENTES ====================== */
+function vistaClientes(){
+  return `
+  <button onclick="mostrarFormCliente()" class="tap w-full bg-indigo-700 text-white font-bold text-lg py-3.5 rounded-2xl mt-2 mb-4">+ Nuevo cliente</button>
+  ${state.clientes.length ? state.clientes.map(c => `
+    <div class="card p-4 mb-3 flex items-center justify-between">
+      <button onclick="mostrarFormCliente('${c.id}')" class="text-left">
+        <div class="font-bold text-gray-800 text-lg">👤 ${c.nombre}</div>
+        <div class="text-gray-400 text-sm">${c.telefono || 'Sin teléfono'}</div>
+        ${c.fiado>0 ? `<div class="text-red-600 font-bold text-sm mt-1">Debe ${money(c.fiado)}</div>` : ''}
+      </button>
+      ${c.telefono ? `<a href="https://wa.me/${limpiarTelefono(c.telefono)}" target="_blank" class="tap w-11 h-11 rounded-full bg-green-50 flex items-center justify-center text-xl">💬</a>` : ''}
+    </div>
+  `).join('') : `<div class="text-center py-16 text-gray-400"><div class="text-5xl mb-3">👥</div>Todavía no tenés clientes cargados</div>`}
+  `;
+}
+function mostrarFormCliente(id = null){
+  const c = id ? state.clientes.find(x=>x.id===id) : null;
+  abrirModal(`
+    <div class="p-5">
+      <div class="text-xl font-extrabold text-gray-900 mb-4">${c?'Editar cliente':'Nuevo cliente'}</div>
+      <input id="cf-nombre" value="${c?c.nombre:''}" placeholder="Nombre" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg mb-3" />
+      <input id="cf-telefono" value="${c?c.telefono:''}" placeholder="WhatsApp (opcional)" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg mb-3" />
+      <label class="font-semibold text-gray-600">Cumpleaños (opcional)</label>
+      <input id="cf-cumpleanos" type="date" value="${c?(c.cumpleanos||''):''}" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2 mb-4" />
+      <button onclick="guardarCliente('${id||''}')" class="tap w-full bg-indigo-700 text-white font-bold py-4 rounded-2xl text-lg mb-2">Guardar</button>
+      ${c ? `<button onclick="eliminarCliente('${id}')" class="tap w-full text-red-600 font-bold py-3">Eliminar cliente</button>` : ''}
+    </div>
+  `);
+}
+function guardarCliente(id){
+  const nombre = document.getElementById('cf-nombre').value.trim();
+  const telefono = document.getElementById('cf-telefono').value.trim();
+  const cumpleanos = document.getElementById('cf-cumpleanos').value || '';
+  if(!nombre){ toast('Escribí el nombre', {icon:'✍️'}); return; }
+  if(id){
+    Object.assign(state.clientes.find(c=>c.id===id), { nombre, telefono, cumpleanos });
+  } else {
+    state.clientes.push({ id: uid(), nombre, telefono, cumpleanos, fiado: 0 });
+  }
+  guardar();
+  cerrarModal();
+  renderApp();
+}
+function eliminarCliente(id){
+  confirmarAccion('¿Eliminar este cliente?', () => {
+    state.clientes = state.clientes.filter(c=>c.id!==id);
+    guardar();
+    cerrarModal();
+    renderApp();
+  });
+}
+
+/* ====================== REPORTES ====================== */
+let filtroPeriodoReportes = 'mes';
+function formatearCambio(actual, anterior){
+  if(anterior <= 0){
+    return actual > 0 ? { texto: 'primera vez con ventas', color: '#059669' } : { texto: 'sin datos del mes pasado', color: '#9ca3af' };
+  }
+  const pct = ((actual - anterior) / anterior) * 100;
+  const signo = pct >= 0 ? '▲' : '▼';
+  return { texto: `${signo} ${Math.abs(pct).toFixed(0)}%`, color: pct >= 0 ? '#059669' : '#dc2626' };
+}
+function calcularRanking(ventasFiltradas){
+  const stats = {};
+  ventasFiltradas.forEach(v => {
+    v.items.forEach(it => {
+      const p = state.productos.find(x=>x.id===it.productoId);
+      const key = 'p:'+it.productoId;
+      if(!stats[key]) stats[key] = { emoji: p?p.emoji:'❔', nombre: p?p.nombre:'(producto eliminado)', cantidad:0, ganancia:0 };
+      stats[key].cantidad += it.cantidad;
+      if(p) stats[key].ganancia += (p.precio - p.costo) * it.cantidad;
+    });
+    (v.combos||[]).forEach(cv => {
+      const c = state.combos.find(x=>x.id===cv.comboId);
+      const key = 'c:'+cv.comboId;
+      if(!stats[key]) stats[key] = { emoji: c?c.emoji:'🎁', nombre: c?(c.nombre+' (combo)'):'(combo eliminado)', cantidad:0, ganancia:0 };
+      stats[key].cantidad += cv.cantidad;
+      if(c){
+        let costoCombo = 0;
+        c.itemIds.forEach(ci => { const p = state.productos.find(x=>x.id===ci.productoId); if(p) costoCombo += p.costo*ci.cantidad; });
+        stats[key].ganancia += (c.precio - costoCombo) * cv.cantidad;
+      }
+    });
+  });
+  return Object.values(stats);
+}
+function vistaReportes(){
+  const hoy = new Date();
+  const inicioMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1).getTime();
+  const inicioMesAnterior = new Date(hoy.getFullYear(), hoy.getMonth()-1, 1).getTime();
+  const ventasFiltradas = filtroPeriodoReportes === 'mes' ? state.ventas.filter(v => v.fecha >= inicioMes) : state.ventas;
+  const ventasOrdenadas = [...ventasFiltradas].sort((a,b)=>b.fecha-a.fecha);
+  const totalPeriodo = ventasOrdenadas.reduce((s,v)=>s+v.total,0);
+  const gananciaPeriodo = ventasOrdenadas.reduce((s,v)=>s+v.ganancia,0);
+
+  const ventasMesAnterior = state.ventas.filter(v => v.fecha >= inicioMesAnterior && v.fecha < inicioMes);
+  const totalMesAnterior = ventasMesAnterior.reduce((s,v)=>s+v.total,0);
+  const gananciaMesAnterior = ventasMesAnterior.reduce((s,v)=>s+v.ganancia,0);
+  const cambioVentas = formatearCambio(totalPeriodo, totalMesAnterior);
+  const cambioGanancia = formatearCambio(gananciaPeriodo, gananciaMesAnterior);
+
+  const ranking = calcularRanking(ventasFiltradas);
+  const gastosPeriodo = gastosPeriodoActual().reduce((s,g)=>s+g.monto,0);
+  const gananciaNeta = gananciaPeriodo - gastosPeriodo;
+
+  const porVendedor = {};
+  if(state.usuarios.length){
+    ventasFiltradas.forEach(v => {
+      const key = v.vendedorId || '__sin__';
+      if(!porVendedor[key]) porVendedor[key] = { nombre: (state.usuarios.find(u=>u.id===key)||{}).nombre || 'Sin asignar', total:0, ganancia:0 };
+      porVendedor[key].total += v.total;
+      porVendedor[key].ganancia += v.ganancia;
+    });
+  }
+  const ventasPorVendedor = Object.values(porVendedor).sort((a,b)=>b.total-a.total);
+
+  return `
+  <div class="flex gap-2 mt-2 mb-4">
+    <button onclick="filtroPeriodoReportes='mes'; renderApp();" class="tap flex-1 py-2.5 rounded-xl font-bold ${filtroPeriodoReportes==='mes'?'bg-indigo-700 text-white':'bg-white text-gray-500'}">Este mes</button>
+    <button onclick="filtroPeriodoReportes='todo'; renderApp();" class="tap flex-1 py-2.5 rounded-xl font-bold ${filtroPeriodoReportes==='todo'?'bg-indigo-700 text-white':'bg-white text-gray-500'}">Todo el historial</button>
+  </div>
+  <div class="grid grid-cols-2 gap-3 mb-4">
+    ${tarjetaStat('💰', filtroPeriodoReportes==='mes' ? 'Vendido este mes' : 'Total vendido', money(totalPeriodo), '#ecfdf5', '#059669', "")}
+    ${tarjetaStat('📈', filtroPeriodoReportes==='mes' ? 'Ganancia este mes' : 'Ganancia total', money(gananciaPeriodo), '#eef0ff', '#4338ca', "")}
+  </div>
+
+  ${filtroPeriodoReportes==='mes' && (totalMesAnterior>0 || totalPeriodo>0) ? `
+  <div class="card p-4 mb-4">
+    <div class="section-label mb-2">📊 Comparado con el mes pasado</div>
+    <div class="flex items-center justify-between py-1.5">
+      <span class="text-gray-700">Vendido</span>
+      <span class="font-bold" style="color:${cambioVentas.color}">${cambioVentas.texto}</span>
+    </div>
+    <div class="flex items-center justify-between py-1.5">
+      <span class="text-gray-700">Ganancia</span>
+      <span class="font-bold" style="color:${cambioGanancia.color}">${cambioGanancia.texto}</span>
+    </div>
+  </div>` : ''}
+
+  <div class="card p-4 mb-4">
+    <div class="section-label mb-2">${filtroPeriodoReportes==='mes' ? 'Ganancia por día, este mes' : 'Ganancia de los últimos 14 días'}</div>
+    <canvas id="chart-reportes" height="160"></canvas>
+  </div>
+
+  ${ranking.length ? `
+  <div class="card p-4 mb-4">
+    <div class="section-label mb-2">🏆 Más vendidos</div>
+    ${[...ranking].sort((a,b)=>b.cantidad-a.cantidad).slice(0,5).map((r,i) => `
+      <div class="flex items-center justify-between py-1.5 ${i<4?'border-b border-gray-100':''}">
+        <span class="text-gray-700 truncate">${r.emoji} ${r.nombre}</span>
+        <span class="font-bold text-gray-900 whitespace-nowrap ml-2">${r.cantidad} un.</span>
+      </div>`).join('')}
+  </div>
+  <div class="card p-4 mb-4">
+    <div class="section-label mb-2">💰 Los que más ganan</div>
+    ${[...ranking].sort((a,b)=>b.ganancia-a.ganancia).slice(0,5).map((r,i) => `
+      <div class="flex items-center justify-between py-1.5 ${i<4?'border-b border-gray-100':''}">
+        <span class="text-gray-700 truncate">${r.emoji} ${r.nombre}</span>
+        <span class="font-bold text-green-600 whitespace-nowrap ml-2">${money(r.ganancia)}</span>
+      </div>`).join('')}
+  </div>` : ''}
+
+  ${ventasPorVendedor.length ? `
+  <div class="card p-4 mb-4">
+    <div class="section-label mb-2">👤 Ventas por vendedor</div>
+    ${ventasPorVendedor.map((vv,i) => `
+      <div class="flex items-center justify-between py-1.5 ${i<ventasPorVendedor.length-1?'border-b border-gray-100':''}">
+        <span class="text-gray-700 truncate">${vv.nombre}</span>
+        <span class="font-bold text-gray-900 whitespace-nowrap ml-2">${money(vv.total)}</span>
+      </div>`).join('')}
+  </div>` : ''}
+
+  <div class="card p-4 mb-4">
+    <div class="section-label mb-2">🧾 Gastos y ganancia neta</div>
+    <div class="flex items-center justify-between py-1.5">
+      <span class="text-gray-700">Ganancia bruta</span>
+      <span class="font-bold text-gray-900">${money(gananciaPeriodo)}</span>
+    </div>
+    <div class="flex items-center justify-between py-1.5">
+      <span class="text-gray-700">Gastos</span>
+      <span class="font-bold text-red-600">− ${money(gastosPeriodo)}</span>
+    </div>
+    <div class="flex items-center justify-between py-2 mt-1 border-t border-gray-100">
+      <span class="font-bold text-gray-800">Ganancia neta</span>
+      <span class="text-xl font-extrabold ${gananciaNeta>=0?'text-green-600':'text-red-600'}">${money(gananciaNeta)}</span>
+    </div>
+    <button onclick="ir('#/gastos')" class="tap w-full bg-gray-50 text-gray-700 font-bold py-2.5 rounded-xl mt-2 text-sm">Ver / cargar gastos</button>
+  </div>
+
+  <div class="grid grid-cols-2 gap-2 mb-4">
+    <button onclick="descargarReporteCSV()" class="tap bg-white border-2 border-gray-200 text-gray-700 font-bold py-3 rounded-2xl text-sm">⬇️ Exportar CSV</button>
+    <button onclick="imprimirReporte()" class="tap bg-white border-2 border-gray-200 text-gray-700 font-bold py-3 rounded-2xl text-sm">🖨️ Imprimir / PDF</button>
+  </div>
+
+  <div class="section-label mb-2">Historial</div>
+  ${ventasOrdenadas.length ? ventasOrdenadas.slice(0,60).map(v => `
+    <button onclick="verDetalleVenta('${v.id}')" class="tap card p-3 mb-2 flex items-center justify-between w-full text-left">
+      <div>
+        <div class="text-gray-800 font-semibold">${fechaHora(v.fecha)}</div>
+        <div class="text-gray-400 text-sm">${iconoMetodo(v.metodoPago)} ${v.items.reduce((s,i)=>s+i.cantidad,0) + (v.combos||[]).reduce((s,i)=>s+i.cantidad,0)} producto(s)</div>
+      </div>
+      <div class="font-extrabold text-gray-900">${money(v.total)}</div>
+    </button>
+  `).join('') : `<div class="text-center py-10 text-gray-400">Todavía no hay ventas ${filtroPeriodoReportes==='mes'?'este mes':''}</div>`}
+  `;
+}
+function ventasPeriodoActual(){
+  const hoy = new Date();
+  const inicioMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1).getTime();
+  return filtroPeriodoReportes === 'mes' ? state.ventas.filter(v => v.fecha >= inicioMes) : state.ventas;
+}
+function descargarReporteCSV(){
+  const ventas = [...ventasPeriodoActual()].sort((a,b)=>a.fecha-b.fecha);
+  const filas = [['Fecha','Hora','Metodo de pago','Cantidad de productos','Total','Ganancia']];
+  ventas.forEach(v => {
+    const d = new Date(v.fecha);
+    const cantidad = v.items.reduce((s,i)=>s+i.cantidad,0) + (v.combos||[]).reduce((s,i)=>s+i.cantidad,0);
+    filas.push([d.toLocaleDateString('es-AR'), d.toLocaleTimeString('es-AR'), v.metodoPago, cantidad, v.total, v.ganancia]);
+  });
+  const csv = filas.map(f => f.map(c => `"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const blob = new Blob(['﻿'+csv], { type:'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `ventas-${state.negocio.nombre.replace(/[^a-z0-9]/gi,'-').toLowerCase()}-${new Date().toISOString().slice(0,10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  toast('CSV descargado', { icon:'⬇️' });
+}
+function imprimirReporte(){
+  const ventas = ventasPeriodoActual();
+  const total = ventas.reduce((s,v)=>s+v.total,0);
+  const ganancia = ventas.reduce((s,v)=>s+v.ganancia,0);
+  const gastos = gastosPeriodoActual().reduce((s,g)=>s+g.monto,0);
+  const ranking = [...calcularRanking(ventas)].sort((a,b)=>b.cantidad-a.cantidad).slice(0,10);
+  const ventasOrd = [...ventas].sort((a,b)=>b.fecha-a.fecha);
+  document.getElementById('area-impresion').innerHTML = `
+    <div style="font-family: sans-serif; padding: 16px; width: 700px;">
+      <h1 style="margin-bottom:0;">${state.negocio.nombre}</h1>
+      <p style="color:#666; margin-top:4px;">Reporte de ventas — ${filtroPeriodoReportes==='mes' ? 'Este mes' : 'Todo el historial'} — generado el ${fechaHora(Date.now())}</p>
+      <table style="width:100%; border-collapse:collapse; margin:16px 0;">
+        <tr><td style="padding:4px 0;">Vendido</td><td style="text-align:right; font-weight:bold;">${money(total)}</td></tr>
+        <tr><td style="padding:4px 0;">Ganancia bruta</td><td style="text-align:right; font-weight:bold;">${money(ganancia)}</td></tr>
+        <tr><td style="padding:4px 0;">Gastos</td><td style="text-align:right; font-weight:bold;">${money(gastos)}</td></tr>
+        <tr><td style="padding:4px 0; border-top:1px solid #ccc;">Ganancia neta</td><td style="text-align:right; font-weight:bold; border-top:1px solid #ccc;">${money(ganancia-gastos)}</td></tr>
+      </table>
+      <h3>Más vendidos</h3>
+      <table style="width:100%; border-collapse:collapse; margin-bottom:16px;">
+        ${ranking.map(r => `<tr><td style="padding:2px 0;">${r.emoji} ${r.nombre}</td><td style="text-align:right;">${r.cantidad} un. — ${money(r.ganancia)}</td></tr>`).join('')}
+      </table>
+      <h3>Historial de ventas</h3>
+      <table style="width:100%; border-collapse:collapse; font-size:13px;">
+        <tr style="border-bottom:1px solid #ccc;"><th style="text-align:left;">Fecha</th><th style="text-align:left;">Método</th><th style="text-align:right;">Total</th></tr>
+        ${ventasOrd.map(v => `<tr><td>${fechaHora(v.fecha)}</td><td>${v.metodoPago}</td><td style="text-align:right;">${money(v.total)}</td></tr>`).join('')}
+      </table>
+    </div>
+  `;
+  window.print();
+}
+function iconoMetodo(m){ return m==='efectivo'?'💵':m==='transferencia'?'📲':'📒'; }
+function verDetalleVenta(id){
+  const venta = state.ventas.find(v=>v.id===id);
+  if(!venta) return;
+  const items = venta.items.map(it => {
+    const p = state.productos.find(x=>x.id===it.productoId);
+    return { nombre: p ? p.nombre : '(producto eliminado)', emoji: p ? p.emoji : '❔', cantidad: it.cantidad };
+  });
+  const combos = (venta.combos||[]).map(cv => {
+    const c = state.combos.find(x=>x.id===cv.comboId);
+    return { nombre: c ? `${c.nombre} (combo)` : '(combo eliminado)', emoji: c ? c.emoji : '🎁', cantidad: cv.cantidad };
+  });
+  const todosLosItems = [...items, ...combos];
+  abrirModal(`
+    <div class="p-5">
+      <div class="text-xl font-extrabold text-gray-900 mb-1">Venta del ${fechaHora(venta.fecha)}</div>
+      <div class="text-gray-400 mb-4">${iconoMetodo(venta.metodoPago)} ${venta.metodoPago}</div>
+      <div class="flex flex-col gap-2 mb-4">
+        ${todosLosItems.map(it => `<div class="flex items-center justify-between text-gray-700"><span>${it.emoji} ${it.nombre}</span><span class="font-bold">x${it.cantidad}</span></div>`).join('')}
+      </div>
+      <div class="flex items-center justify-between text-2xl font-extrabold border-t pt-4 mb-5">
+        <span>Total</span><span class="text-green-600">${money(venta.total)}</span>
+      </div>
+      <button onclick="imprimirComprobante('${id}')" class="tap w-full bg-gray-50 text-gray-700 font-bold py-3.5 rounded-2xl mb-2">🖨️ Imprimir comprobante</button>
+      <button onclick="eliminarVenta('${id}')" class="tap w-full bg-red-50 text-red-600 font-bold py-3.5 rounded-2xl">🗑️ Eliminar esta venta</button>
+    </div>
+  `);
+}
+function imprimirComprobante(id){
+  const venta = state.ventas.find(v=>v.id===id);
+  if(!venta) return;
+  const items = venta.items.map(it => {
+    const p = state.productos.find(x=>x.id===it.productoId);
+    return { nombre: p ? p.nombre : '(producto eliminado)', cantidad: it.cantidad, precio: p ? p.precio : 0 };
+  });
+  const combos = (venta.combos||[]).map(cv => {
+    const c = state.combos.find(x=>x.id===cv.comboId);
+    return { nombre: c ? `${c.nombre} (combo)` : '(combo eliminado)', cantidad: cv.cantidad, precio: c ? c.precio : 0 };
+  });
+  const todosLosItems = [...items, ...combos];
+  document.getElementById('area-impresion').innerHTML = `
+    <div style="font-family: monospace; padding: 16px; width: 280px;">
+      <h2 style="text-align:center; margin-bottom:0;">${state.negocio.nombre}</h2>
+      <p style="text-align:center; margin-top:4px;">${fechaHora(venta.fecha)}</p>
+      <hr>
+      ${todosLosItems.map(it => `<div style="display:flex; justify-content:space-between;"><span>${it.cantidad}x ${it.nombre}</span><span>${money(it.precio*it.cantidad)}</span></div>`).join('')}
+      <hr>
+      <div style="display:flex; justify-content:space-between; font-weight:bold; font-size:16px;"><span>TOTAL</span><span>${money(venta.total)}</span></div>
+      <p style="text-align:center;">${iconoMetodo(venta.metodoPago)} ${venta.metodoPago}</p>
+      <p style="text-align:center; margin-top:20px;">¡Gracias por su compra!</p>
+    </div>
+  `;
+  window.print();
+}
+function eliminarVenta(id){
+  confirmarAccion('¿Eliminar esta venta? Se va a devolver el stock y, si era fiado, se va a descontar la deuda del cliente. Va a quedar registrado en el cierre de caja.', () => {
+    const venta = state.ventas.find(v=>v.id===id);
+    if(!venta) return;
+    state.eliminaciones.push({ id: uid(), ventaId: venta.id, ventaFecha: venta.fecha, monto: venta.total, fecha: Date.now(), quienId: state.usuarioActualId||'', quienNombre: usuarioActualNombre() });
+    revertirVenta(venta);
+    guardar();
+    cerrarModal();
+    renderApp();
+    toast('Venta eliminada', { icon:'🗑️' });
+  });
+}
+function dibujarGraficoReportes(){
+  const ctx = document.getElementById('chart-reportes');
+  if(!ctx) return;
+  const dias = [], totales = [];
+  if(filtroPeriodoReportes === 'mes'){
+    const hoy = new Date();
+    for(let dia=1; dia<=hoy.getDate(); dia++){
+      const d = new Date(hoy.getFullYear(), hoy.getMonth(), dia).getTime();
+      const dSig = new Date(hoy.getFullYear(), hoy.getMonth(), dia+1).getTime();
+      dias.push(String(dia));
+      totales.push(state.ventas.filter(v => v.fecha >= d && v.fecha < dSig).reduce((s,v)=>s+v.ganancia,0));
+    }
+  } else {
+    for(let i=13;i>=0;i--){
+      const d = new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate()-i);
+      const dSig = d.getTime() + 24*3600*1000;
+      dias.push(d.toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit'}));
+      totales.push(state.ventas.filter(v => v.fecha >= d.getTime() && v.fecha < dSig).reduce((s,v)=>s+v.ganancia,0));
+    }
+  }
+  new Chart(ctx, {
+    type: 'line',
+    data: { labels: dias, datasets: [{ data: totales, borderColor:'#4338ca', backgroundColor:'rgba(67,56,202,.1)', fill:true, tension:.3, pointRadius:2 }] },
+    options: { plugins:{legend:{display:false}}, scales:{ y:{beginAtZero:true, ticks:{display:false}, grid:{display:false}}, x:{grid:{display:false}} } }
+  });
+}
+
+/* ====================== CONFIGURACIÓN ====================== */
+function vistaConfig(){
+  return `
+  <div class="card p-4 mt-2 mb-4">
+    <div class="font-bold text-gray-700 mb-3 text-lg">Datos del negocio</div>
+    <label class="font-semibold text-gray-600">Nombre</label>
+    <input id="cfg-nombre" value="${state.negocio.nombre}" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2" />
+    <label class="font-semibold text-gray-600">Rubro</label>
+    <div class="w-full bg-gray-50 border-2 border-gray-100 rounded-2xl px-4 py-3 text-lg my-2 text-gray-500">${nombreRubro(state.negocio.tipo)} <span class="text-sm">(no se puede cambiar)</span></div>
+    <label class="font-semibold text-gray-600">Meta de venta diaria (opcional)</label>
+    <input id="cfg-meta" type="number" inputmode="decimal" value="${state.metaDiaria||''}" placeholder="Ej: 50000" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2" />
+    <button onclick="guardarConfig()" class="tap w-full bg-indigo-700 text-white font-bold py-3.5 rounded-2xl text-lg mt-2">Guardar cambios</button>
+  </div>
+
+  ${cuentas.length > 1 ? `
+  <div class="card p-4 mb-4">
+    <div class="font-bold text-gray-700 mb-1 text-lg">🏬 Otros negocios</div>
+    <div class="text-gray-500 text-sm mb-3">Tenés ${cuentas.length} negocios cargados en este dispositivo, cada uno con sus datos separados.</div>
+    <button onclick="cerrarCuenta()" class="tap w-full bg-white border-2 border-gray-200 text-gray-700 font-bold py-3.5 rounded-2xl">Cambiar de negocio</button>
+  </div>` : `
+  <div class="card p-4 mb-4">
+    <button onclick="cerrarCuenta()" class="tap w-full bg-white border-2 border-gray-200 text-gray-700 font-bold py-3.5 rounded-2xl">🏬 Agregar / cambiar de negocio</button>
+  </div>`}
+
+  <div class="card p-4 mb-4">
+    <div class="font-bold text-gray-700 mb-3 text-lg">Tamaño de la letra</div>
+    <div class="grid grid-cols-2 gap-2">
+      <button onclick="cambiarTamanoLetra('pequeno')" class="tap py-3 rounded-2xl font-bold border-2 ${state.tamanoLetra==='pequeno'?'bg-indigo-700 text-white border-indigo-700':'bg-white text-gray-600 border-gray-200'}" style="font-size:0.9rem;">Pequeño</button>
+      <button onclick="cambiarTamanoLetra('normal')" class="tap py-3 rounded-2xl font-bold border-2 ${state.tamanoLetra==='normal'?'bg-indigo-700 text-white border-indigo-700':'bg-white text-gray-600 border-gray-200'}">Normal</button>
+      <button onclick="cambiarTamanoLetra('grande')" class="tap py-3 rounded-2xl font-bold border-2 ${state.tamanoLetra==='grande'?'bg-indigo-700 text-white border-indigo-700':'bg-white text-gray-600 border-gray-200'}" style="font-size:1.05rem;">Grande</button>
+      <button onclick="cambiarTamanoLetra('muy-grande')" class="tap py-3 rounded-2xl font-bold border-2 ${state.tamanoLetra==='muy-grande'?'bg-indigo-700 text-white border-indigo-700':'bg-white text-gray-600 border-gray-200'}" style="font-size:1.15rem;">Muy grande</button>
+    </div>
+  </div>
+
+  <div class="card p-4 mb-4">
+    <div class="font-bold text-gray-700 mb-1 text-lg">👥 Usuarios / Vendedores</div>
+    <div class="text-gray-500 text-sm mb-3">Si atienden varias personas, cargá a cada una con su PIN para saber quién vendió qué. Solo el administrador puede gestionarlos.</div>
+    <button onclick="mostrarUsuarios()" class="tap w-full bg-white border-2 border-gray-200 text-gray-700 font-bold py-3.5 rounded-2xl">Gestionar usuarios (${state.usuarios.length})</button>
+  </div>
+
+  ${usuarioEsAdmin() ? `
+  <div class="card p-4 mb-4">
+    <div class="font-bold text-gray-700 mb-1 text-lg">💾 Copia de seguridad</div>
+    <div class="text-gray-500 text-sm mb-3">Tus datos viven solo en este teléfono. Descargá una copia de vez en cuando para no perder nada si cambiás de celular o se borra el navegador.</div>
+    <button onclick="descargarBackup()" class="tap w-full bg-indigo-700 text-white font-bold py-3.5 rounded-2xl mb-2">⬇️ Descargar copia de seguridad</button>
+    <button onclick="document.getElementById('input-restaurar').click()" class="tap w-full bg-white border-2 border-gray-200 text-gray-700 font-bold py-3.5 rounded-2xl">⬆️ Restaurar desde archivo</button>
+    <input type="file" id="input-restaurar" accept="application/json,.json" style="display:none" onchange="restaurarBackup(event)" />
+  </div>
+
+  <div class="card p-4 mb-4 bg-amber-50">
+    <div class="font-bold text-amber-700 mb-1">📱 Versión de prueba</div>
+    <div class="text-amber-700 text-sm">Por ahora tus datos se guardan solo en este teléfono/navegador. No se sincronizan con otros dispositivos todavía. Usá la copia de seguridad de arriba para no perderlos.</div>
+  </div>
+
+  <button onclick="borrarTodo()" class="tap w-full text-red-600 font-bold py-3.5 border-2 border-red-100 rounded-2xl">🗑️ Borrar todos los datos</button>
+  ` : ''}
+  `;
+}
+function guardarConfig(){
+  state.negocio.nombre = document.getElementById('cfg-nombre').value.trim() || state.negocio.nombre;
+  state.metaDiaria = parseFloat(document.getElementById('cfg-meta').value) || 0;
+  const cuenta = cuentas.find(c=>c.id===cuentaActivaId);
+  if(cuenta){ cuenta.nombreCuenta = state.negocio.nombre; guardarCuentas(); }
+  guardar();
+  renderApp();
+  toast('Datos guardados', {icon:'✅'});
+}
+
+/* ---- Usuarios / Vendedores (PIN) ---- */
+function usuarioActualNombre(){
+  const u = state.usuarios.find(x=>x.id===state.usuarioActualId);
+  return u ? u.nombre : 'Elegir vendedor';
+}
+function usuarioEsAdmin(){
+  if(!state.usuarios.length) return true; // sin sistema de usuarios activado: no hay restricciones
+  const u = state.usuarios.find(x=>x.id===state.usuarioActualId);
+  return !!(u && u.rol === 'admin');
+}
+function exigirAdmin(mensaje){
+  if(usuarioEsAdmin()) return true;
+  toast(mensaje || 'Esta acción es solo para el administrador', { icon:'🔒' });
+  return false;
+}
+function mostrarUsuarios(){
+  if(!exigirAdmin('Solo el administrador puede gestionar usuarios')) return;
+  abrirModal(`
+    <div class="p-5">
+      <div class="text-xl font-extrabold text-gray-900 mb-4">Usuarios / Vendedores</div>
+      <button onclick="mostrarFormUsuario()" class="tap w-full bg-indigo-700 text-white font-bold py-3.5 rounded-2xl mb-4">+ Nuevo usuario</button>
+      <div class="flex flex-col gap-2 max-h-72 overflow-y-auto">
+        ${state.usuarios.length ? state.usuarios.map(u => `
+          <button onclick="mostrarFormUsuario('${u.id}')" class="tap card p-3 flex items-center justify-between text-left">
+            <span class="font-bold text-gray-800">${u.nombre} ${u.rol==='admin'?'👑':''}</span>
+            <span class="text-gray-400 text-sm">${u.rol==='admin'?'Administrador':'Vendedor'}</span>
+          </button>`).join('') : `<div class="text-center text-gray-400 py-6">Todavía no cargaste usuarios</div>`}
+      </div>
+    </div>
+  `);
+}
+function mostrarFormUsuario(id = null){
+  const u = id ? state.usuarios.find(x=>x.id===id) : null;
+  abrirModal(`
+    <div class="p-5">
+      <div class="text-xl font-extrabold text-gray-900 mb-4">${u ? 'Editar usuario' : 'Nuevo usuario'}</div>
+      <label class="font-semibold text-gray-600">Nombre</label>
+      <input id="uf-nombre" value="${u?u.nombre:''}" placeholder="Ej: Juan" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2 mb-3" />
+      <label class="font-semibold text-gray-600">Rol</label>
+      <select id="uf-rol" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2 mb-3">
+        <option value="vendedor" ${u&&u.rol==='vendedor'?'selected':''}>Vendedor</option>
+        <option value="admin" ${u&&u.rol==='admin'?'selected':''}>Administrador</option>
+      </select>
+      <label class="font-semibold text-gray-600">${u ? 'Nuevo PIN de 4 dígitos (dejar vacío para no cambiarlo)' : 'PIN de 4 dígitos'}</label>
+      <input id="uf-pin" value="" type="text" inputmode="numeric" maxlength="4" placeholder="${u?'••••':'Ej: 1234'}" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2 mb-4" />
+      <button onclick="guardarUsuario('${id||''}')" class="tap w-full bg-indigo-700 text-white font-bold py-4 rounded-2xl text-lg mb-2">Guardar</button>
+      ${u ? `<button onclick="eliminarUsuario('${id}')" class="tap w-full text-red-600 font-bold py-3">Eliminar usuario</button>` : ''}
+    </div>
+  `);
+}
+function guardarUsuario(id){
+  const nombre = document.getElementById('uf-nombre').value.trim();
+  const rol = document.getElementById('uf-rol').value;
+  const pin = document.getElementById('uf-pin').value.trim();
+  if(!nombre){ toast('Escribí el nombre', {icon:'✍️'}); return; }
+  if(id){
+    if(pin && !/^\d{4}$/.test(pin)){ toast('El PIN tiene que ser de 4 números', {icon:'🔢'}); return; }
+    const u = state.usuarios.find(x=>x.id===id);
+    Object.assign(u, { nombre, rol }, pin ? { pin } : {});
+  } else {
+    if(!/^\d{4}$/.test(pin)){ toast('El PIN tiene que ser de 4 números', {icon:'🔢'}); return; }
+    state.usuarios.push({ id: uid(), nombre, rol, pin });
+  }
+  guardar();
+  cerrarModal();
+  renderApp();
+  toast('Usuario guardado', {icon:'✅'});
+}
+function eliminarUsuario(id){
+  confirmarAccion('¿Eliminar este usuario?', () => {
+    state.usuarios = state.usuarios.filter(x=>x.id!==id);
+    if(state.usuarioActualId === id) state.usuarioActualId = '';
+    guardar();
+    cerrarModal();
+    renderApp();
+  });
+}
+function mostrarSelectorUsuario(){
+  abrirModal(`
+    <div class="p-5">
+      <div class="text-xl font-extrabold text-gray-900 mb-4">¿Quién sos?</div>
+      <div class="flex flex-col gap-2">
+        ${state.usuarios.map(u => `
+          <button onclick="mostrarIngresoPIN('${u.id}')" class="tap card p-4 flex items-center gap-3 text-left">
+            <span class="icon-badge" style="background:#eef0ff; color:#4338ca; font-weight:800;">${u.nombre.charAt(0).toUpperCase()}</span>
+            <span class="font-bold text-gray-800">${u.nombre}</span>
+          </button>`).join('')}
+      </div>
+    </div>
+  `);
+}
+let pinIngresado = '';
+function mostrarIngresoPIN(usuarioId){
+  pinIngresado = '';
+  const u = state.usuarios.find(x=>x.id===usuarioId);
+  abrirModal(`
+    <div class="p-5 text-center">
+      <div class="text-xl font-extrabold text-gray-900 mb-1">Hola, ${u.nombre}</div>
+      <div class="text-gray-400 mb-4">Ingresá tu PIN de 4 dígitos</div>
+      <div id="pin-puntos" class="flex justify-center gap-3 mb-6 text-2xl tracking-widest">○ ○ ○ ○</div>
+      <div class="grid grid-cols-3 gap-3">
+        ${[1,2,3,4,5,6,7,8,9].map(n=>`<button onclick="tocarPIN('${usuarioId}',${n})" class="tap card py-4 text-2xl font-bold">${n}</button>`).join('')}
+        <div></div>
+        <button onclick="tocarPIN('${usuarioId}',0)" class="tap card py-4 text-2xl font-bold">0</button>
+        <button onclick="borrarPIN()" class="tap card py-4 text-xl font-bold">⌫</button>
+      </div>
+    </div>
+  `);
+}
+function tocarPIN(usuarioId, digito){
+  if(pinIngresado.length >= 4) return;
+  pinIngresado += digito;
+  const el = document.getElementById('pin-puntos');
+  if(el) el.textContent = pinIngresado.split('').map(()=>'●').join(' ') + (pinIngresado.length<4 ? ' ' + Array(4-pinIngresado.length).fill('○').join(' ') : '');
+  if(pinIngresado.length === 4){
+    const u = state.usuarios.find(x=>x.id===usuarioId);
+    if(u.pin === pinIngresado){
+      state.usuarioActualId = usuarioId;
+      guardar();
+      cerrarModal();
+      renderApp();
+      toast(`¡Hola, ${u.nombre}!`, {icon:'👋'});
+    } else {
+      toast('PIN incorrecto', {icon:'⚠️'});
+      pinIngresado = '';
+      if(el) el.textContent = '○ ○ ○ ○';
+    }
+  }
+}
+function borrarPIN(){
+  pinIngresado = pinIngresado.slice(0,-1);
+  const el = document.getElementById('pin-puntos');
+  if(el) el.textContent = pinIngresado.split('').map(()=>'●').join(' ') + (pinIngresado.length<4 ? ' ' + Array(4-pinIngresado.length).fill('○').join(' ') : '');
+}
+function cambiarTamanoLetra(v){
+  state.tamanoLetra = v;
+  guardar();
+  aplicarTamanoLetra();
+  renderApp();
+  toast('Tamaño de letra actualizado', {icon:'🔤'});
+}
+function descargarBackup(){
+  const datos = JSON.stringify(state, null, 2);
+  const blob = new Blob([datos], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const nombreArchivo = `backup-${state.negocio.nombre.replace(/[^a-z0-9]/gi,'-').toLowerCase()}-${new Date().toISOString().slice(0,10)}.json`;
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = nombreArchivo;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  toast('Copia de seguridad descargada', {icon:'⬇️'});
+}
+function restaurarBackup(event){
+  const file = event.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try{
+      const datos = JSON.parse(e.target.result);
+      if(!datos.negocio){ toast('Ese archivo no parece una copia de seguridad válida', {icon:'⚠️'}); return; }
+      confirmarAccion('¿Restaurar esta copia? Se van a reemplazar todos los datos actuales por los del archivo.', () => {
+        state = { ...estadoVacio(), ...datos };
+        migrarProductos();
+        guardar();
+        aplicarTamanoLetra();
+        ir('#/inicio');
+        renderApp();
+        toast('Copia restaurada correctamente', {icon:'✅'});
+      }, 'Sí, restaurar');
+    }catch(err){
+      toast('No se pudo leer ese archivo', {icon:'⚠️'});
+    }
+  };
+  reader.readAsText(file);
+  event.target.value = '';
+}
+function borrarTodo(){
+  confirmarAccion('¿Seguro? Se van a borrar TODOS los productos, clientes y ventas. Esto no se puede deshacer.', () => {
+    confirmarAccion('Última confirmación: ¿borrar todo de verdad?', () => {
+      localStorage.removeItem(STORAGE_KEY);
+      state = estadoVacio();
+      onboardingPaso = 1;
+      ir('#/inicio');
+      renderApp();
+    }, 'Sí, borrar todo');
+  }, 'Continuar');
+}
+</script>
+</body>
+</html>
