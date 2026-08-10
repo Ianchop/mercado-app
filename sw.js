@@ -1,4 +1,4 @@
-const CACHE = 'mercado-app-v1';
+const CACHE = 'mercado-app-v2';
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -16,8 +16,18 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
+// Primero red, caché solo como respaldo si no hay conexión. Antes era al
+// revés (caché primero) y una vez guardado el index.html quedaba pegado
+// para siempre: las actualizaciones nunca se veían aunque se publicara
+// código nuevo, porque nunca se volvía a pedir por red.
 self.addEventListener('fetch', (event) => {
   event.respondWith(
-    caches.match(event.request).then((cached) => cached || fetch(event.request))
+    fetch(event.request)
+      .then((res) => {
+        const copia = res.clone();
+        caches.open(CACHE).then((cache) => cache.put(event.request, copia));
+        return res;
+      })
+      .catch(() => caches.match(event.request))
   );
 });
