@@ -281,6 +281,7 @@ let configPagos = { linkMercadoPago: '' };
 let pantallaCrearPassword = false; // true: logueado con Google pero sin contraseña propia todavía
 let vinculandoGoogleEmail = '';    // no vacío: el mail ya tenía cuenta con contraseña, hay que confirmarla para unir Google
 let errorCargaDatos = false;       // true: no se pudieron cargar los datos del negocio (conexión lenta/caída) — no seguir a onboarding para no pisar datos reales
+let modoDemoAdmin = false;         // true: el admin está viendo la app normal (su propio negocio de demo) en vez del panel
 
 function suscripcionValida(s){
   if(!s || !s.proximoVencimiento) return false;
@@ -556,6 +557,7 @@ window.addEventListener('DOMContentLoaded', () => {
     listaSuscripciones = [];
     pantallaCrearPassword = false;
     errorCargaDatos = false;
+    modoDemoAdmin = false;
     // Todo este bloque va blindado: si algo revienta acá adentro que no
     // esperábamos, no queremos que la página quede en blanco para siempre.
     // Mejor mostrar la pantalla de "no pudimos cargar" con el error real.
@@ -568,6 +570,15 @@ window.addEventListener('DOMContentLoaded', () => {
       try{ configPagos = await conTimeout(window.fbCargarConfigPagos()); }catch(e){ configPagos = { linkMercadoPago:'' }; }
       if(user.email === ADMIN_EMAIL){
         try{ listaSuscripciones = await conTimeout(window.fbListarSuscripciones()); }catch(e){ listaSuscripciones = []; }
+        // El admin también puede tener su propio negocio de "demo" (sin pagar,
+        // exento por ser admin) para mostrarle las funciones a un dueño de local.
+        try{
+          const datos = await conTimeout(window.fbCargarNegocio(user.uid));
+          state = datos ? { ...estadoVacio(), ...datos } : estadoVacio();
+          migrarProductos();
+        }catch(e){
+          state = estadoVacio();
+        }
       } else {
         try{
           const datos = await conTimeout(window.fbCargarNegocio(user.uid));
@@ -666,7 +677,7 @@ function renderApp(){
     app.innerHTML = vistaErrorCarga();
     return;
   }
-  if(esAdminActual()){
+  if(esAdminActual() && !modoDemoAdmin){
     app.innerHTML = vistaAdmin();
     return;
   }
@@ -674,7 +685,9 @@ function renderApp(){
     app.innerHTML = vistaOnboarding();
     return;
   }
-  if(!suscripcionValida(suscripcionActual)){
+  // El admin no paga: puede entrar a la app con su propio negocio de prueba
+  // para mostrarle las funciones a un dueño de local antes de venderle la suscripción.
+  if(!esAdminActual() && !suscripcionValida(suscripcionActual)){
     app.innerHTML = vistaPago();
     return;
   }
@@ -697,6 +710,11 @@ function renderApp(){
     default: contenido = vistaInicio();
   }
   app.innerHTML = `
+    ${esAdminActual() && modoDemoAdmin ? `
+    <div class="bg-amber-500 text-white text-center text-sm font-bold py-2 px-4 flex items-center justify-center gap-3">
+      <span>👑 Modo demo (cuenta admin)</span>
+      <button onclick="salirDemoAdmin()" class="underline">Volver al panel admin</button>
+    </div>` : ''}
     ${cabecera()}
     <div class="px-4">${contenido}</div>
     ${navInferior(pantalla)}
@@ -907,8 +925,12 @@ function finalizarOnboarding(tipo){
   state.negocio = { nombre: onboardingNombre, tipo };
   state.productos = crearProductosSeed(tipo);
   guardar();
-  suscripcionActual = { email: usuarioFirebase.email, nombreNegocio: onboardingNombre, tipo, fechaCreacion: Date.now(), proximoVencimiento: '' };
-  window.fbCrearSuscripcion(usuarioFirebase.uid, suscripcionActual).catch(() => {});
+  // El negocio de demo del propio admin no paga ni aparece en la lista de
+  // negocios reales: no le creamos suscripción, ya está exento en el router.
+  if(!esAdminActual()){
+    suscripcionActual = { email: usuarioFirebase.email, nombreNegocio: onboardingNombre, tipo, fechaCreacion: Date.now(), proximoVencimiento: '' };
+    window.fbCrearSuscripcion(usuarioFirebase.uid, suscripcionActual).catch(() => {});
+  }
   ir('#/inicio');
   renderApp();
 }
@@ -953,7 +975,8 @@ function vistaAdmin(){
       <div class="text-gray-500 text-sm mb-1">Negocios con suscripción activa</div>
       <div class="text-3xl font-extrabold text-gray-900">${activos} / ${listaSuscripciones.length}</div>
     </div>
-    <button onclick="mostrarConfigPagoLink()" class="tap w-full bg-white border-2 border-gray-200 text-gray-700 font-bold py-3.5 rounded-2xl mb-4">🔗 Configurar link de pago (Mercado Pago)</button>
+    <button onclick="mostrarConfigPagoLink()" class="tap w-full bg-white border-2 border-gray-200 text-gray-700 font-bold py-3.5 rounded-2xl mb-3">🔗 Configurar link de pago (Mercado Pago)</button>
+    <button onclick="entrarDemoAdmin()" class="tap w-full bg-indigo-700 text-white font-bold py-3.5 rounded-2xl mb-4">🖥️ Entrar a la app (mostrarle a un cliente)</button>
     <div class="section-label mb-2">Negocios (${listaSuscripciones.length})</div>
     ${listaSuscripciones.length ? listaSuscripciones.slice().sort((a,b) => (a.nombreNegocio||'').localeCompare(b.nombreNegocio||'')).map(s => {
       const info = estadoSuscripcionInfo(s);
@@ -966,6 +989,15 @@ function vistaAdmin(){
       </div>`;
     }).join('') : `<div class="text-center text-gray-400 py-16">Todavía no hay negocios registrados</div>`}
   </div>`;
+}
+function entrarDemoAdmin(){
+  modoDemoAdmin = true;
+  ir('#/inicio');
+  renderApp();
+}
+function salirDemoAdmin(){
+  modoDemoAdmin = false;
+  renderApp();
 }
 function marcarNegocioPagado(uidNegocio){
   const proximoVencimiento = calcularProximoVencimiento();
