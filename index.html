@@ -10,6 +10,46 @@
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script src="https://unpkg.com/@zxing/library@latest"></script>
+<script type="module">
+  // Firebase: cuentas reales (email/contraseña + Google) y datos en la nube.
+  // Se importa como módulo ES directo desde el CDN de Google: cero instalación,
+  // sigue siendo un solo archivo HTML. Las funciones se cuelgan de "window"
+  // para que el resto de la app (que es JS clásico) las pueda usar normal.
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-app.js";
+  import {
+    getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword,
+    GoogleAuthProvider, signInWithPopup, signOut, sendPasswordResetEmail
+  } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-auth.js";
+  import {
+    getFirestore, doc, getDoc, setDoc, enableIndexedDbPersistence
+  } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-firestore.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyAR3EfaWSJ5vQp2OjjTPa3RKMruLD9EGcs",
+    authDomain: "mercado-appp.firebaseapp.com",
+    projectId: "mercado-appp",
+    storageBucket: "mercado-appp.firebasestorage.app",
+    messagingSenderId: "702858318110",
+    appId: "1:702858318110:web:5c4af57441ef9b5815f90f"
+  };
+
+  const fbApp = initializeApp(firebaseConfig);
+  const fbAuth = getAuth(fbApp);
+  const fbDb = getFirestore(fbApp);
+  try { await enableIndexedDbPersistence(fbDb); } catch(e) { /* varias pestañas abiertas u navegador viejo: seguimos solo-online */ }
+
+  window.fbOnCambioAuth = (callback) => onAuthStateChanged(fbAuth, callback);
+  window.fbRegistrarse = (email, password) => createUserWithEmailAndPassword(fbAuth, email, password);
+  window.fbIniciarSesion = (email, password) => signInWithEmailAndPassword(fbAuth, email, password);
+  window.fbIniciarSesionGoogle = () => signInWithPopup(fbAuth, new GoogleAuthProvider());
+  window.fbResetPassword = (email) => sendPasswordResetEmail(fbAuth, email);
+  window.fbCerrarSesion = () => signOut(fbAuth);
+  window.fbGuardarNegocio = (uid, datos) => setDoc(doc(fbDb, 'negocios', uid), datos);
+  window.fbCargarNegocio = async (uid) => {
+    const snap = await getDoc(doc(fbDb, 'negocios', uid));
+    return snap.exists() ? snap.data() : null;
+  };
+</script>
 <style>
   html { -webkit-text-size-adjust: 100%; }
   body {
@@ -99,41 +139,26 @@
 <div id="app" class="max-w-lg mx-auto min-h-screen"></div>
 
 <script>
-/* ====================== CUENTAS (multi-negocio) ====================== */
-// Cada "cuenta" es un negocio totalmente separado: sus propios productos,
-// ventas, usuarios, etc. Sirve para llevar la misma app a varios negocios
-// sin que se mezclen los datos de uno con los de otro.
-const CUENTAS_KEY = 'mercadoAppCuentas_v1';
-const CUENTA_ACTIVA_KEY = 'mercadoAppCuentaActiva';
-const STORAGE_KEY_LEGACY = 'mercadoAppData_v1'; // formato viejo, de una sola cuenta
-
-function cargarCuentas(){
-  try{
-    const raw = localStorage.getItem(CUENTAS_KEY);
-    return raw ? JSON.parse(raw) : [];
-  }catch(e){ return []; }
-}
-function guardarCuentas(){
-  localStorage.setItem(CUENTAS_KEY, JSON.stringify(cuentas));
-}
-function migrarCuentaLegacy(){
-  if(localStorage.getItem(CUENTAS_KEY)) return;
-  const raw = localStorage.getItem(STORAGE_KEY_LEGACY);
-  if(!raw){ localStorage.setItem(CUENTAS_KEY, JSON.stringify([])); return; }
-  try{
-    const datosViejos = JSON.parse(raw);
-    if(!datosViejos.negocio){ localStorage.setItem(CUENTAS_KEY, JSON.stringify([])); return; }
-    const id = uid();
-    const storageKey = 'mercadoAppData_' + id;
-    localStorage.setItem(storageKey, raw);
-    const cuentaMigrada = { id, nombreCuenta: datosViejos.negocio.nombre, tipo: datosViejos.negocio.tipo, clave: '', storageKey };
-    localStorage.setItem(CUENTAS_KEY, JSON.stringify([cuentaMigrada]));
-    localStorage.setItem(CUENTA_ACTIVA_KEY, id);
-    localStorage.removeItem(STORAGE_KEY_LEGACY);
-  }catch(e){ localStorage.setItem(CUENTAS_KEY, JSON.stringify([])); }
-}
+/* ====================== CUENTAS (Firebase Auth) ====================== */
+// Cada negocio = una cuenta real de Firebase (mail o Google), con sus datos
+// guardados en la nube (Firestore), separados del resto por su propio uid.
 function nombreRubro(tipo){
   return { mercado:'Mercado / Despensa', ropa:'Tienda de ropa', bazar:'Bazar / Regalería', otro:'Otro rubro' }[tipo] || 'Otro rubro';
+}
+function traducirErrorFirebase(err){
+  const codigo = (err && err.code) || '';
+  const mapa = {
+    'auth/invalid-email': 'Ese mail no es válido',
+    'auth/user-not-found': 'No encontramos ninguna cuenta con ese mail',
+    'auth/wrong-password': 'La contraseña es incorrecta',
+    'auth/invalid-credential': 'Mail o contraseña incorrectos',
+    'auth/email-already-in-use': 'Ya existe una cuenta con ese mail',
+    'auth/weak-password': 'La contraseña tiene que tener al menos 6 caracteres',
+    'auth/popup-closed-by-user': 'Cerraste la ventana de Google antes de terminar',
+    'auth/network-request-failed': 'Revisá tu conexión a internet',
+    'auth/unauthorized-domain': 'Este sitio todavía no está autorizado en Firebase',
+  };
+  return mapa[codigo] || 'Ocurrió un error, probá de nuevo';
 }
 
 /* ====================== ESTADO Y PERSISTENCIA ====================== */
@@ -157,26 +182,9 @@ function estadoVacio(){
   };
 }
 
-migrarCuentaLegacy();
-let cuentas = cargarCuentas();
-let cuentaActivaId = localStorage.getItem(CUENTA_ACTIVA_KEY) || '';
-let state = (cuentaActivaId && cuentas.find(c=>c.id===cuentaActivaId)) ? cargarEstadoCuenta(cuentaActivaId) : estadoVacio();
-migrarProductos();
-
-function storageKeyActivo(){
-  const c = cuentas.find(x=>x.id===cuentaActivaId);
-  return c ? c.storageKey : null;
-}
-function cargarEstadoCuenta(id){
-  const c = cuentas.find(x=>x.id===id);
-  if(!c) return estadoVacio();
-  try{
-    const raw = localStorage.getItem(c.storageKey);
-    if(!raw) return estadoVacio();
-    const parsed = JSON.parse(raw);
-    return { ...estadoVacio(), ...parsed };
-  }catch(e){ return estadoVacio(); }
-}
+let state = estadoVacio();
+let usuarioFirebase = null; // usuario de Firebase logueado (o null)
+let sesionLista = false; // true recién cuando Firebase nos confirmó si hay sesión o no
 
 function migrarProductos(){
   state.productos.forEach(p => {
@@ -191,10 +199,15 @@ function migrarProductos(){
   });
 }
 
+let guardarTimeout = null;
 function guardar(){
-  const key = storageKeyActivo();
-  if(!key) return;
-  localStorage.setItem(key, JSON.stringify(state));
+  if(!usuarioFirebase) return;
+  clearTimeout(guardarTimeout);
+  guardarTimeout = setTimeout(() => {
+    window.fbGuardarNegocio(usuarioFirebase.uid, state).catch(() => {
+      toast('No se pudo guardar en la nube. Revisá tu conexión.', { icon:'⚠️', duracion:4000 });
+    });
+  }, 400);
 }
 
 function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
@@ -398,7 +411,29 @@ function ejecutarConfirmacion(){
 
 /* ====================== ROUTER ====================== */
 window.addEventListener('hashchange', renderApp);
-window.addEventListener('DOMContentLoaded', () => { aplicarTamanoLetra(); renderApp(); });
+window.addEventListener('DOMContentLoaded', () => {
+  aplicarTamanoLetra();
+  renderApp(); // pantalla de carga mientras Firebase confirma la sesión
+  window.fbOnCambioAuth(async (user) => {
+    usuarioFirebase = user;
+    if(user){
+      try{
+        const datos = await window.fbCargarNegocio(user.uid);
+        state = datos ? { ...estadoVacio(), ...datos } : estadoVacio();
+        migrarProductos();
+      }catch(e){
+        state = estadoVacio();
+        toast('No pudimos cargar tus datos. Revisá tu conexión.', { icon:'⚠️', duracion:4500 });
+      }
+    } else {
+      state = estadoVacio();
+    }
+    sesionLista = true;
+    aplicarTamanoLetra();
+    if(!location.hash || location.hash === '#/' || location.hash === '#'){ location.hash = '#/inicio'; }
+    renderApp();
+  });
+});
 
 if('serviceWorker' in navigator){
   window.addEventListener('load', () => {
@@ -421,11 +456,14 @@ function aplicarTamanoLetra(){
 
 function ir(hash){ location.hash = hash; }
 
-let mostrandoNuevaCuenta = false;
 function renderApp(){
   const app = document.getElementById('app');
-  if(!cuentaActivaId || !cuentas.find(c=>c.id===cuentaActivaId)){
-    app.innerHTML = mostrandoNuevaCuenta ? vistaOnboarding() : vistaSelectorCuentas();
+  if(!sesionLista){
+    app.innerHTML = vistaCargando();
+    return;
+  }
+  if(!usuarioFirebase){
+    app.innerHTML = vistaLogin();
     return;
   }
   if(!state.negocio){
@@ -459,87 +497,80 @@ function renderApp(){
   if(pantalla === 'reportes') dibujarGraficoReportes();
 }
 
-/* ====================== SELECTOR DE CUENTAS (multi-negocio) ====================== */
-function vistaSelectorCuentas(){
+/* ====================== SESIÓN (Firebase Auth) ====================== */
+function vistaCargando(){
   return `
   <div class="min-h-screen flex flex-col items-center justify-center px-6 text-center">
     <div class="text-6xl mb-4">🏪</div>
-    <h1 class="text-3xl font-extrabold text-gray-900 mb-2">${cuentas.length ? '¿Qué negocio abrís?' : '¡Bienvenido!'}</h1>
-    <p class="text-gray-500 mb-8 text-lg">${cuentas.length ? 'Cada negocio tiene sus datos completamente separados.' : 'Vamos a armar tu negocio, muy fácil.'}</p>
-    ${cuentas.length ? `
-    <div class="flex flex-col gap-3 w-full mb-6">
-      ${cuentas.map(c => `
-        <button onclick="intentarAbrirCuenta('${c.id}')" class="tap card p-4 flex items-center gap-3 text-left">
-          <span class="icon-badge" style="background:#eef0ff; color:#4338ca; font-weight:800;">${c.nombreCuenta.charAt(0).toUpperCase()}</span>
-          <span class="min-w-0">
-            <span class="font-bold text-gray-800 block truncate">${c.nombreCuenta}</span>
-            <span class="text-gray-400 text-sm">${nombreRubro(c.tipo)}</span>
-          </span>
-        </button>`).join('')}
-    </div>` : ''}
-    <button onclick="mostrarNuevaCuenta()" class="tap w-full bg-indigo-700 text-white font-bold text-lg py-4 rounded-2xl shadow-lg">+ Nuevo negocio</button>
+    <div class="text-gray-400 font-semibold">Cargando...</div>
   </div>`;
 }
-function intentarAbrirCuenta(id){
-  const c = cuentas.find(x=>x.id===id);
-  if(!c) return;
-  if(!c.clave){ abrirCuenta(id); return; }
-  abrirModal(`
-    <div class="p-5 text-center">
-      <div class="text-xl font-extrabold text-gray-900 mb-1">${c.nombreCuenta}</div>
-      <div class="text-gray-400 mb-4">Ingresá la clave de este negocio</div>
-      <input id="clave-cuenta-input" type="password" placeholder="Clave" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg text-center mb-4" />
-      <button onclick="verificarClaveCuenta('${id}')" class="tap w-full bg-indigo-700 text-white font-bold py-4 rounded-2xl text-lg">Entrar</button>
+let modoLogin = 'iniciar'; // 'iniciar' | 'registrar'
+function vistaLogin(){
+  return `
+  <div class="min-h-screen flex flex-col items-center justify-center px-6 text-center">
+    <div class="text-6xl mb-4">🏪</div>
+    <h1 class="text-3xl font-extrabold text-gray-900 mb-2">${modoLogin==='iniciar' ? '¡Bienvenido de nuevo!' : 'Creá tu cuenta'}</h1>
+    <p class="text-gray-500 mb-8 text-lg">${modoLogin==='iniciar' ? 'Entrá con el mail de tu negocio' : 'Vas a poder entrar desde cualquier dispositivo'}</p>
+    <div class="card w-full p-6">
+      <label class="block text-left font-bold text-gray-700 mb-2">Email</label>
+      <input id="login-email" type="email" placeholder="tu@email.com" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg mb-3 focus:border-indigo-600 focus:outline-none" />
+      <label class="block text-left font-bold text-gray-700 mb-2">Contraseña</label>
+      <input id="login-password" type="password" placeholder="••••••••" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg mb-2 focus:border-indigo-600 focus:outline-none" />
+      ${modoLogin==='iniciar' ? `<button onclick="olvideContrasena()" class="text-indigo-700 font-semibold text-sm mb-4">¿Olvidaste tu contraseña?</button>` : `<div class="mb-4"></div>`}
+      <button onclick="${modoLogin==='iniciar' ? 'intentarIniciarSesion()' : 'intentarRegistrarse()'}" class="tap w-full bg-indigo-700 text-white font-bold text-xl py-4 rounded-2xl shadow-lg mb-3">
+        ${modoLogin==='iniciar' ? 'Iniciar sesión' : 'Crear cuenta'}
+      </button>
+      <div class="flex items-center gap-3 my-3">
+        <div class="flex-1 h-px bg-gray-200"></div><span class="text-gray-400 text-sm">o</span><div class="flex-1 h-px bg-gray-200"></div>
+      </div>
+      <button onclick="intentarGoogleSignIn()" class="tap w-full bg-white border-2 border-gray-200 text-gray-700 font-bold text-lg py-3.5 rounded-2xl flex items-center justify-center gap-2">
+        <span>🔵</span> Continuar con Google
+      </button>
     </div>
-  `);
+    <button onclick="modoLogin = modoLogin==='iniciar'?'registrar':'iniciar'; renderApp();" class="mt-6 text-gray-500 font-semibold">
+      ${modoLogin==='iniciar' ? '¿No tenés cuenta? Creá una' : '¿Ya tenés cuenta? Iniciá sesión'}
+    </button>
+  </div>`;
 }
-function verificarClaveCuenta(id){
-  const c = cuentas.find(x=>x.id===id);
-  const val = document.getElementById('clave-cuenta-input').value;
-  if(val === c.clave){
-    cerrarModal();
-    abrirCuenta(id);
-  } else {
-    toast('Clave incorrecta', {icon:'⚠️'});
-  }
+function intentarIniciarSesion(){
+  const email = document.getElementById('login-email').value.trim();
+  const password = document.getElementById('login-password').value;
+  if(!email || !password){ toast('Completá el mail y la contraseña', {icon:'✍️'}); return; }
+  window.fbIniciarSesion(email, password).catch(err => toast(traducirErrorFirebase(err), {icon:'⚠️', duracion:4500}));
 }
-function abrirCuenta(id){
-  cuentaActivaId = id;
-  localStorage.setItem(CUENTA_ACTIVA_KEY, id);
-  state = cargarEstadoCuenta(id);
-  migrarProductos();
-  aplicarTamanoLetra();
-  ir('#/inicio');
-  renderApp();
+function intentarRegistrarse(){
+  const email = document.getElementById('login-email').value.trim();
+  const password = document.getElementById('login-password').value;
+  if(!email || !password){ toast('Completá el mail y la contraseña', {icon:'✍️'}); return; }
+  if(password.length < 6){ toast('La contraseña tiene que tener al menos 6 caracteres', {icon:'🔒'}); return; }
+  window.fbRegistrarse(email, password).catch(err => toast(traducirErrorFirebase(err), {icon:'⚠️', duracion:4500}));
 }
-function cerrarCuenta(){
-  cuentaActivaId = '';
-  localStorage.removeItem(CUENTA_ACTIVA_KEY);
-  state = estadoVacio();
-  mostrandoNuevaCuenta = false;
-  location.hash = '';
-  renderApp();
+function intentarGoogleSignIn(){
+  window.fbIniciarSesionGoogle().catch(err => toast(traducirErrorFirebase(err), {icon:'⚠️', duracion:4500}));
 }
-function mostrarNuevaCuenta(){
-  mostrandoNuevaCuenta = true;
-  onboardingPaso = 1;
-  onboardingNombre = '';
-  onboardingClave = '';
-  renderApp();
+function olvideContrasena(){
+  const email = document.getElementById('login-email').value.trim();
+  if(!email){ toast('Escribí tu mail arriba primero', {icon:'✍️'}); return; }
+  window.fbResetPassword(email)
+    .then(() => toast('Te mandamos un mail para restablecer tu contraseña', {icon:'📧', duracion:5000}))
+    .catch(err => toast(traducirErrorFirebase(err), {icon:'⚠️', duracion:4500}));
+}
+function cerrarSesionApp(){
+  window.fbCerrarSesion();
 }
 
 /* ====================== ONBOARDING (nuevo negocio) ====================== */
 let onboardingPaso = 1;
 let onboardingNombre = '';
-let onboardingClave = '';
 
 function vistaOnboarding(){
   if(onboardingPaso === 1){
     return `
     <div class="min-h-screen flex flex-col items-center justify-center px-6 text-center">
       <div class="text-6xl mb-4">🏪</div>
-      <h1 class="text-3xl font-extrabold text-gray-900 mb-2">Nuevo negocio</h1>
-      <p class="text-gray-500 mb-8 text-lg">Vamos a armarlo en 3 pasos, muy fácil.</p>
+      <h1 class="text-3xl font-extrabold text-gray-900 mb-2">¡Ya casi!</h1>
+      <p class="text-gray-500 mb-8 text-lg">Vamos a armar tu negocio, muy fácil.</p>
       <div class="card w-full p-6">
         <label class="block text-left font-bold text-gray-700 mb-2 text-lg">¿Cómo se llama tu negocio?</label>
         <input id="input-nombre-negocio" type="text" placeholder="Ej: Almacén Don José"
@@ -548,23 +579,7 @@ function vistaOnboarding(){
           Continuar →
         </button>
       </div>
-      ${cuentas.length ? `<button onclick="cerrarCuenta()" class="mt-6 text-gray-400 font-semibold">← Volver</button>` : ''}
-    </div>`;
-  }
-  if(onboardingPaso === 2){
-    return `
-    <div class="min-h-screen flex flex-col items-center justify-center px-6 text-center">
-      <div class="text-5xl mb-3">🔒</div>
-      <h1 class="text-2xl font-extrabold text-gray-900 mb-1">Protegé tu negocio</h1>
-      <p class="text-gray-500 mb-6 text-lg">Ponele una clave para que solo vos puedas entrar (opcional, pero recomendado)</p>
-      <div class="card w-full p-6">
-        <input id="input-clave-negocio" type="password" placeholder="Clave (dejalo vacío si no querés)"
-          class="w-full border-2 border-gray-200 rounded-2xl px-4 py-4 text-xl text-center focus:border-indigo-600 focus:outline-none" />
-        <button onclick="continuarOnboarding2()" class="tap mt-5 w-full bg-indigo-700 text-white font-bold text-xl py-4 rounded-2xl shadow-lg">
-          Continuar →
-        </button>
-      </div>
-      <button onclick="onboardingPaso=1; renderApp();" class="mt-6 text-gray-400 font-semibold">← Volver</button>
+      <button onclick="cerrarSesionApp()" class="mt-6 text-gray-400 font-semibold">← Cerrar sesión</button>
     </div>`;
   }
   return `
@@ -578,7 +593,7 @@ function vistaOnboarding(){
         ${botonTipo('bazar','🎁','Bazar / Regalería')}
         ${botonTipo('otro','🏪','Otro rubro')}
       </div>
-      <button onclick="onboardingPaso=2; renderApp();" class="mt-6 text-gray-400 font-semibold">← Volver</button>
+      <button onclick="onboardingPaso=1; renderApp();" class="mt-6 text-gray-400 font-semibold">← Volver</button>
     </div>`;
 }
 function botonTipo(tipo, emoji, label){
@@ -594,23 +609,11 @@ function continuarOnboarding1(){
   onboardingPaso = 2;
   renderApp();
 }
-function continuarOnboarding2(){
-  onboardingClave = document.getElementById('input-clave-negocio').value.trim();
-  onboardingPaso = 3;
-  renderApp();
-}
 function finalizarOnboarding(tipo){
-  const id = uid();
-  const storageKey = 'mercadoAppData_' + id;
-  cuentas.push({ id, nombreCuenta: onboardingNombre, tipo, clave: onboardingClave, storageKey });
-  guardarCuentas();
-  cuentaActivaId = id;
-  localStorage.setItem(CUENTA_ACTIVA_KEY, id);
   state = estadoVacio();
   state.negocio = { nombre: onboardingNombre, tipo };
   state.productos = crearProductosSeed(tipo);
   guardar();
-  mostrandoNuevaCuenta = false;
   toast(`¡Listo! Ya cargamos ${state.productos.length} productos de ejemplo para que empieces`, {icon:'🎉', duracion:4500});
   ir('#/inicio');
   renderApp();
@@ -2465,15 +2468,11 @@ function vistaConfig(){
     <button onclick="guardarConfig()" class="tap w-full bg-indigo-700 text-white font-bold py-3.5 rounded-2xl text-lg mt-2">Guardar cambios</button>
   </div>
 
-  ${cuentas.length > 1 ? `
   <div class="card p-4 mb-4">
-    <div class="font-bold text-gray-700 mb-1 text-lg">🏬 Otros negocios</div>
-    <div class="text-gray-500 text-sm mb-3">Tenés ${cuentas.length} negocios cargados en este dispositivo, cada uno con sus datos separados.</div>
-    <button onclick="cerrarCuenta()" class="tap w-full bg-white border-2 border-gray-200 text-gray-700 font-bold py-3.5 rounded-2xl">Cambiar de negocio</button>
-  </div>` : `
-  <div class="card p-4 mb-4">
-    <button onclick="cerrarCuenta()" class="tap w-full bg-white border-2 border-gray-200 text-gray-700 font-bold py-3.5 rounded-2xl">🏬 Agregar / cambiar de negocio</button>
-  </div>`}
+    <div class="font-bold text-gray-700 mb-1 text-lg">🔐 Tu cuenta</div>
+    <div class="text-gray-500 text-sm mb-3">${usuarioFirebase ? usuarioFirebase.email : ''}</div>
+    <button onclick="cerrarSesionApp()" class="tap w-full bg-white border-2 border-gray-200 text-gray-700 font-bold py-3.5 rounded-2xl">Cerrar sesión</button>
+  </div>
 
   <div class="card p-4 mb-4">
     <div class="font-bold text-gray-700 mb-3 text-lg">Tamaño de la letra</div>
@@ -2494,15 +2493,15 @@ function vistaConfig(){
   ${usuarioEsAdmin() ? `
   <div class="card p-4 mb-4">
     <div class="font-bold text-gray-700 mb-1 text-lg">💾 Copia de seguridad</div>
-    <div class="text-gray-500 text-sm mb-3">Tus datos viven solo en este teléfono. Descargá una copia de vez en cuando para no perder nada si cambiás de celular o se borra el navegador.</div>
+    <div class="text-gray-500 text-sm mb-3">Tus datos ya se guardan solos en la nube con tu cuenta. Esta copia es un extra, por si alguna vez la necesitás.</div>
     <button onclick="descargarBackup()" class="tap w-full bg-indigo-700 text-white font-bold py-3.5 rounded-2xl mb-2">⬇️ Descargar copia de seguridad</button>
     <button onclick="document.getElementById('input-restaurar').click()" class="tap w-full bg-white border-2 border-gray-200 text-gray-700 font-bold py-3.5 rounded-2xl">⬆️ Restaurar desde archivo</button>
     <input type="file" id="input-restaurar" accept="application/json,.json" style="display:none" onchange="restaurarBackup(event)" />
   </div>
 
-  <div class="card p-4 mb-4 bg-amber-50">
-    <div class="font-bold text-amber-700 mb-1">📱 Versión de prueba</div>
-    <div class="text-amber-700 text-sm">Por ahora tus datos se guardan solo en este teléfono/navegador. No se sincronizan con otros dispositivos todavía. Usá la copia de seguridad de arriba para no perderlos.</div>
+  <div class="card p-4 mb-4 bg-emerald-50">
+    <div class="font-bold text-emerald-700 mb-1">☁️ Datos en la nube</div>
+    <div class="text-emerald-700 text-sm">Tu negocio queda guardado en tu cuenta. Podés entrar desde cualquier celular o computadora con el mismo mail.</div>
   </div>
 
   <button onclick="borrarTodo()" class="tap w-full text-red-600 font-bold py-3.5 border-2 border-red-100 rounded-2xl">🗑️ Borrar todos los datos</button>
@@ -2512,8 +2511,6 @@ function vistaConfig(){
 function guardarConfig(){
   state.negocio.nombre = document.getElementById('cfg-nombre').value.trim() || state.negocio.nombre;
   state.metaDiaria = parseFloat(document.getElementById('cfg-meta').value) || 0;
-  const cuenta = cuentas.find(c=>c.id===cuentaActivaId);
-  if(cuenta){ cuenta.nombreCuenta = state.negocio.nombre; guardarCuentas(); }
   guardar();
   renderApp();
   toast('Datos guardados', {icon:'✅'});
@@ -2701,8 +2698,8 @@ function restaurarBackup(event){
 function borrarTodo(){
   confirmarAccion('¿Seguro? Se van a borrar TODOS los productos, clientes y ventas. Esto no se puede deshacer.', () => {
     confirmarAccion('Última confirmación: ¿borrar todo de verdad?', () => {
-      localStorage.removeItem(STORAGE_KEY);
       state = estadoVacio();
+      guardar();
       onboardingPaso = 1;
       ir('#/inicio');
       renderApp();
