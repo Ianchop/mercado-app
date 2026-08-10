@@ -2408,29 +2408,75 @@ function escanearParaVender(){
 }
 
 /* ====================== VINCULAR CÓDIGO DE BARRAS ======================
-   No hay forma de conseguir de antemano el código de barras real de fábrica
-   de cada producto (no existe una base pública/gratuita con todos). Esto
-   resuelve lo mismo de la forma en que lo hacen los sistemas de POS reales:
-   la primera vez que se escanea un producto real y el código no está
-   cargado, se deja elegir a QUÉ producto del catálogo corresponde (en vez
-   de crear uno duplicado) — así el código real queda guardado para
-   siempre, aprendido escaneo a escaneo en vez de inventado. */
+   No hay ninguna base de códigos de fábrica completa para poder cargarlos
+   de antemano en los 893 productos. En cambio, cuando se escanea un código
+   que no está cargado, se consulta Open Food Facts (base pública y
+   gratuita, sin necesidad de clave) para decir QUÉ PRODUCTO ES de verdad
+   (nombre, marca, foto) — y recién con esa info a la vista, se elige a cuál
+   producto del catálogo propio corresponde (o se carga como nuevo, ya
+   con esos datos precargados). */
 let _codigoAVincular = '';
 let _callbackVincular = null;
-function mostrarVincularCodigoBarras(codigo, callback){
+let _infoProductoEscaneado = null;
+async function buscarInfoCodigoBarras(codigo){
+  try{
+    const resp = await fetch(`https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(codigo)}.json?fields=product_name,brands,image_front_small_url`);
+    if(!resp.ok) return null;
+    const data = await resp.json();
+    if(data.status !== 1 || !data.product || !data.product.product_name) return null;
+    return {
+      nombre: data.product.product_name,
+      marca: (data.product.brands || '').split(',')[0].trim(),
+      imagen: data.product.image_front_small_url || ''
+    };
+  }catch(e){
+    return null; // sin internet, API caída, etc: seguimos con la búsqueda manual nomás
+  }
+}
+async function mostrarVincularCodigoBarras(codigo, callback){
   _codigoAVincular = codigo;
   _callbackVincular = callback;
+  _infoProductoEscaneado = null;
   abrirModal(`
     <div class="p-5">
-      <div class="text-xl font-extrabold text-gray-900 mb-1">Código no reconocido</div>
-      <div class="text-gray-500 text-sm mb-4">Código: <b>${codigo}</b>. Si ya tenés este producto cargado, buscalo para guardarle el código. Si es nuevo, cargalo desde cero.</div>
-      <input id="vincular-busqueda" type="text" placeholder="Buscar producto..." oninput="filtrarVincularCodigoBarras()" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg mb-3 focus:border-indigo-600 focus:outline-none" />
-      <div id="vincular-resultados" class="flex flex-col gap-2 mb-3" style="max-height:35vh; overflow-y:auto;"></div>
-      <button onclick="cerrarModal(); mostrarFormProducto(null, {codigoBarras:'${codigo}'});" class="tap w-full bg-white border-2 border-gray-200 text-gray-700 font-bold py-3.5 rounded-2xl mb-2">+ Es un producto nuevo</button>
+      <div class="text-xl font-extrabold text-gray-900 mb-1">Código escaneado</div>
+      <div id="vincular-info-producto" class="mb-4">
+        <div class="text-gray-400 text-sm flex items-center gap-2">${icono('loader-circle','w-4 h-4 animate-spin')} Buscando qué producto es (código ${codigo})...</div>
+      </div>
+      <label class="font-semibold text-gray-600 text-sm">¿A cuál de tus productos corresponde?</label>
+      <input id="vincular-busqueda" type="text" placeholder="Buscar en tu catálogo..." oninput="filtrarVincularCodigoBarras()" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg mt-1 mb-3 focus:border-indigo-600 focus:outline-none" />
+      <div id="vincular-resultados" class="flex flex-col gap-2 mb-3" style="max-height:30vh; overflow-y:auto;"></div>
+      <button onclick="crearProductoDesdeEscaneo()" class="tap w-full bg-white border-2 border-gray-200 text-gray-700 font-bold py-3.5 rounded-2xl mb-2">+ Es un producto nuevo</button>
       <button onclick="cerrarModal()" class="tap w-full text-gray-400 font-semibold py-2">Cancelar</button>
     </div>
   `);
-  document.getElementById('vincular-busqueda').focus();
+  const elBusq = document.getElementById('vincular-busqueda');
+  if(elBusq) elBusq.focus();
+
+  const info = await buscarInfoCodigoBarras(codigo);
+  if(_codigoAVincular !== codigo) return; // se escaneó/cerró otra cosa mientras tanto
+  _infoProductoEscaneado = info;
+  const contenedor = document.getElementById('vincular-info-producto');
+  if(!contenedor) return; // el modal ya se cerró
+  if(info){
+    contenedor.innerHTML = `
+      <div class="card p-3 flex items-center gap-3" style="background:#ecfdf5; border:none;">
+        ${info.imagen ? `<img src="${info.imagen}" class="w-12 h-12 rounded-lg object-cover flex-shrink-0" />` : `<span class="text-3xl flex-shrink-0">📦</span>`}
+        <div class="min-w-0">
+          <div class="text-emerald-700 text-xs font-extrabold tracking-wide">ESTE ES EL PRODUCTO</div>
+          <div class="font-bold text-gray-800 truncate">${info.nombre}</div>
+          ${info.marca ? `<div class="text-gray-500 text-xs truncate">${info.marca}</div>` : ''}
+        </div>
+      </div>
+    `;
+    // precargamos la búsqueda con lo encontrado para ayudar a ubicarlo en el catálogo propio
+    if(elBusq && !elBusq.value){
+      elBusq.value = info.nombre.split(' ').slice(0,2).join(' ');
+      filtrarVincularCodigoBarras();
+    }
+  } else {
+    contenedor.innerHTML = `<div class="text-gray-400 text-sm">No encontramos información pública de este código. Buscá el producto en tu catálogo o cargalo como nuevo.</div>`;
+  }
 }
 function filtrarVincularCodigoBarras(){
   const texto = (document.getElementById('vincular-busqueda').value || '').trim().toLowerCase();
@@ -2460,6 +2506,15 @@ function vincularCodigoBarras(productoId){
   const cb = _callbackVincular;
   _callbackVincular = null;
   if(cb) cb(p);
+}
+function crearProductoDesdeEscaneo(){
+  const codigo = _codigoAVincular;
+  const info = _infoProductoEscaneado;
+  cerrarModal();
+  mostrarFormProducto(null, {
+    codigoBarras: codigo,
+    ...(info ? { nombre: info.nombre, marca: info.marca } : {})
+  });
 }
 
 function abrirModalCobrar(){
