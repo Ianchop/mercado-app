@@ -18,7 +18,8 @@
   import { initializeApp } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-app.js";
   import {
     getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword,
-    GoogleAuthProvider, signInWithRedirect, getRedirectResult, signOut, sendPasswordResetEmail
+    GoogleAuthProvider, signInWithRedirect, getRedirectResult, signOut, sendPasswordResetEmail,
+    EmailAuthProvider, linkWithCredential
   } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-auth.js";
   import {
     getFirestore, doc, getDoc, setDoc, updateDoc, collection, getDocs, enableIndexedDbPersistence
@@ -72,9 +73,31 @@
   };
   window.fbGuardarConfigPagos = (datos) => setDoc(doc(fbDb, 'config', 'pagos'), datos);
 
+  // Cuentas creadas por Google: además del login de Google, exigimos una
+  // contraseña propia (linkWithCredential la agrega a la MISMA cuenta, no
+  // crea una cuenta nueva). Así el mail siempre tiene los dos métodos y
+  // nunca se pisan entre sí.
+  window.fbVincularPassword = (password) => {
+    const cred = EmailAuthProvider.credential(fbAuth.currentUser.email, password);
+    return linkWithCredential(fbAuth.currentUser, cred);
+  };
+  // Si alguien ya tenía cuenta por mail/contraseña y después toca "Continuar
+  // con Google" con ese mismo mail, Firebase no los une solo (por seguridad):
+  // hay que confirmar la contraseña existente y recién ahí vincular Google.
+  window.fbCredencialGoogleDeError = (err) => GoogleAuthProvider.credentialFromError(err);
+  window.fbIniciarSesionYVincularGoogle = async (email, password) => {
+    await signInWithEmailAndPassword(fbAuth, email, password);
+    const cred = window.__credencialGooglePendiente;
+    if(cred){
+      await linkWithCredential(fbAuth.currentUser, cred);
+      window.__credencialGooglePendiente = null;
+    }
+  };
+
   // Al volver de la pantalla de Google, Firebase resuelve esto solo; acá
-  // solo capturamos el error si algo salió mal (ej: dominio no autorizado)
-  // para poder avisarle al usuario en vez de fallar en silencio.
+  // solo capturamos el error si algo salió mal (ej: dominio no autorizado,
+  // o el mail ya tenía cuenta con contraseña) para poder avisarle al
+  // usuario en vez de fallar en silencio.
   getRedirectResult(fbAuth).catch((err) => {
     window.__errorRedirectGoogle = err;
   });
@@ -227,6 +250,13 @@ function esAdminActual(){ return !!(usuarioFirebase && usuarioFirebase.email ===
 let suscripcionActual = null; // suscripción del negocio logueado (dueños)
 let listaSuscripciones = [];  // todas las suscripciones (solo panel admin)
 let configPagos = { linkMercadoPago: '' };
+
+/* ====================== CONTRASEÑA OBLIGATORIA PARA CUENTAS DE GOOGLE ======================
+   Toda cuenta tiene que poder entrar también con mail+contraseña (no solo con
+   Google), para no depender de un solo método. Estos dos flags gatean la
+   pantalla correspondiente ANTES que cualquier otra cosa (admin, onboarding, etc). */
+let pantallaCrearPassword = false; // true: logueado con Google pero sin contraseña propia todavía
+let vinculandoGoogleEmail = '';    // no vacío: el mail ya tenía cuenta con contraseña, hay que confirmarla para unir Google
 
 function suscripcionValida(s){
   if(!s || !s.proximoVencimiento) return false;
@@ -476,7 +506,12 @@ window.addEventListener('DOMContentLoaded', () => {
     usuarioFirebase = user;
     suscripcionActual = null;
     listaSuscripciones = [];
+    pantallaCrearPassword = false;
     if(user){
+      // Si entró con Google y todavía no tiene una contraseña vinculada a la
+      // cuenta, lo mandamos a crearla antes de dejarlo pasar a ningún lado.
+      const tienePassword = user.providerData.some(p => p.providerId === 'password');
+      if(!tienePassword) pantallaCrearPassword = true;
       try{ configPagos = await window.fbCargarConfigPagos(); }catch(e){ configPagos = { linkMercadoPago:'' }; }
       if(user.email === ADMIN_EMAIL){
         try{ listaSuscripciones = await window.fbListarSuscripciones(); }catch(e){ listaSuscripciones = []; }
@@ -502,15 +537,22 @@ window.addEventListener('DOMContentLoaded', () => {
       }
     } else {
       state = estadoVacio();
+      // Si "Continuar con Google" falló porque ese mail ya tenía cuenta con
+      // contraseña, no mostramos solo un error: pedimos esa contraseña acá
+      // mismo para unir las dos formas de entrar a la misma cuenta.
+      if(window.__errorRedirectGoogle && window.__errorRedirectGoogle.code === 'auth/account-exists-with-different-credential'){
+        vinculandoGoogleEmail = (window.__errorRedirectGoogle.customData && window.__errorRedirectGoogle.customData.email) || '';
+        window.__credencialGooglePendiente = window.fbCredencialGoogleDeError(window.__errorRedirectGoogle);
+      }
     }
     sesionLista = true;
     aplicarTamanoLetra();
     if(!location.hash || location.hash === '#/' || location.hash === '#'){ location.hash = '#/inicio'; }
     renderApp();
-    if(!user && window.__errorRedirectGoogle){
+    if(!user && window.__errorRedirectGoogle && !vinculandoGoogleEmail){
       toast(traducirErrorFirebase(window.__errorRedirectGoogle), { icon:'⚠️', duracion:5000 });
-      window.__errorRedirectGoogle = null;
     }
+    window.__errorRedirectGoogle = null;
   });
 });
 
@@ -541,8 +583,16 @@ function renderApp(){
     app.innerHTML = vistaCargando();
     return;
   }
+  if(vinculandoGoogleEmail){
+    app.innerHTML = vistaVincularGoogle();
+    return;
+  }
   if(!usuarioFirebase){
     app.innerHTML = vistaLogin();
+    return;
+  }
+  if(pantallaCrearPassword){
+    app.innerHTML = vistaCrearPassword();
     return;
   }
   if(esAdminActual()){
@@ -651,6 +701,74 @@ function olvideContrasena(){
 }
 function cerrarSesionApp(){
   window.fbCerrarSesion();
+}
+
+/* ====================== CONTRASEÑA PARA CUENTAS DE GOOGLE ====================== */
+function campoPasswordConOjo(id, placeholder){
+  return `
+  <div class="relative mb-3">
+    <input id="${id}" type="password" placeholder="${placeholder || '••••••••'}" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 pr-12 text-lg focus:border-indigo-600 focus:outline-none" />
+    <button type="button" onclick="alternarVerPassword('${id}', this)" class="absolute right-3 top-1/2 -translate-y-1/2 text-xl">👁️</button>
+  </div>`;
+}
+function alternarVerPassword(id, boton){
+  const input = document.getElementById(id);
+  const mostrando = input.type === 'text';
+  input.type = mostrando ? 'password' : 'text';
+  boton.textContent = mostrando ? '👁️' : '🙈';
+}
+
+function vistaCrearPassword(){
+  return `
+  <div class="min-h-screen flex flex-col items-center justify-center px-6 text-center">
+    <div class="text-6xl mb-4">🔒</div>
+    <h1 class="text-2xl font-extrabold text-gray-900 mb-2">Creá una contraseña</h1>
+    <p class="text-gray-500 mb-8 text-lg">Entraste con Google. Para que también puedas entrar sin depender de Google, creá una contraseña para <b>${usuarioFirebase ? usuarioFirebase.email : ''}</b>.</p>
+    <div class="card w-full p-6 text-left">
+      <label class="block font-bold text-gray-700 mb-2">Contraseña</label>
+      ${campoPasswordConOjo('crear-password')}
+      <label class="block font-bold text-gray-700 mb-2">Confirmar contraseña</label>
+      ${campoPasswordConOjo('crear-password-confirmar')}
+      <button onclick="confirmarCrearPassword()" class="tap mt-2 w-full bg-indigo-700 text-white font-bold text-xl py-4 rounded-2xl shadow-lg">Guardar contraseña</button>
+    </div>
+    <button onclick="cerrarSesionApp()" class="mt-6 text-gray-400 font-semibold">Cerrar sesión</button>
+  </div>`;
+}
+function confirmarCrearPassword(){
+  const p1 = document.getElementById('crear-password').value;
+  const p2 = document.getElementById('crear-password-confirmar').value;
+  if(!p1 || p1.length < 6){ toast('La contraseña tiene que tener al menos 6 caracteres', {icon:'🔒'}); return; }
+  if(p1 !== p2){ toast('Las contraseñas no coinciden', {icon:'⚠️'}); return; }
+  window.fbVincularPassword(p1)
+    .then(() => { pantallaCrearPassword = false; toast('Contraseña creada', {icon:'✅'}); renderApp(); })
+    .catch(err => toast(traducirErrorFirebase(err), {icon:'⚠️', duracion:4500}));
+}
+
+function vistaVincularGoogle(){
+  return `
+  <div class="min-h-screen flex flex-col items-center justify-center px-6 text-center">
+    <div class="text-6xl mb-4">🔗</div>
+    <h1 class="text-2xl font-extrabold text-gray-900 mb-2">Vinculá tu cuenta de Google</h1>
+    <p class="text-gray-500 mb-8 text-lg">Ya existe una cuenta con contraseña para <b>${vinculandoGoogleEmail}</b>. Ingresá esa contraseña una sola vez para poder entrar con Google de ahora en más.</p>
+    <div class="card w-full p-6 text-left">
+      <label class="block font-bold text-gray-700 mb-2">Contraseña actual</label>
+      ${campoPasswordConOjo('vincular-password')}
+      <button onclick="confirmarVinculacionGoogle()" class="tap mt-2 w-full bg-indigo-700 text-white font-bold text-xl py-4 rounded-2xl shadow-lg">Vincular y entrar</button>
+    </div>
+    <button onclick="cancelarVinculacionGoogle()" class="mt-6 text-gray-400 font-semibold">Cancelar</button>
+  </div>`;
+}
+function confirmarVinculacionGoogle(){
+  const password = document.getElementById('vincular-password').value;
+  if(!password){ toast('Escribí tu contraseña', {icon:'✍️'}); return; }
+  window.fbIniciarSesionYVincularGoogle(vinculandoGoogleEmail, password)
+    .then(() => { vinculandoGoogleEmail = ''; toast('¡Listo! Ya podés entrar con Google también', {icon:'✅', duracion:4000}); renderApp(); })
+    .catch(err => toast(traducirErrorFirebase(err), {icon:'⚠️', duracion:4500}));
+}
+function cancelarVinculacionGoogle(){
+  vinculandoGoogleEmail = '';
+  window.__credencialGooglePendiente = null;
+  renderApp();
 }
 
 /* ====================== ONBOARDING (nuevo negocio) ====================== */
