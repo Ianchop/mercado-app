@@ -1737,7 +1737,30 @@ function ir(hash){ location.hash = hash; }
 
 function renderApp(){
   const app = document.getElementById('app');
-  const mostrar = (html) => { app.innerHTML = html; refrescarIconos(); };
+  // Cada tecleo en un buscador (oninput) dispara renderApp() de nuevo, y eso
+  // reemplaza TODO el HTML de la pantalla — incluido el <input> donde se está
+  // escribiendo. El navegador lo trata como un campo nuevo: pierde el foco y
+  // en el celular se cierra el teclado después de cada letra. Acá guardamos
+  // qué campo tenía el foco (y en qué posición del texto) antes de redibujar,
+  // y se lo devolvemos después, para que se pueda escribir seguido como en
+  // cualquier buscador normal.
+  const mostrar = (html) => {
+    const activo = document.activeElement;
+    const idActivo = (activo && app.contains(activo) && activo.id) ? activo.id : null;
+    const selStart = idActivo && 'selectionStart' in activo ? activo.selectionStart : null;
+    const selEnd = idActivo && 'selectionEnd' in activo ? activo.selectionEnd : null;
+    app.innerHTML = html;
+    refrescarIconos();
+    if(idActivo){
+      const el = document.getElementById(idActivo);
+      if(el){
+        el.focus();
+        if(selStart !== null && el.setSelectionRange){
+          try{ el.setSelectionRange(selStart, selEnd); }catch(e){}
+        }
+      }
+    }
+  };
   if(!sesionLista){
     mostrar(vistaCargando());
     return;
