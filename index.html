@@ -2706,22 +2706,16 @@ function procesarTextoVoz(textoOriginal){
     return;
   }
 
-  // Con un catálogo grande, una palabra genérica ("fideo", "queso") puede matchear
-  // decenas de productos: ahí no tiene sentido mostrar una lista gigante para
-  // elegir, mejor pedirle que sea más específico (marca/tipo) o que toque el
-  // producto de la lista. El selector solo se muestra cuando es manejable.
-  const MAX_OPCIONES_DESAMBIGUAR = 6;
+  // Si con lo dicho alcanza para un solo producto, se agrega directo. Si hay
+  // varios (dijo solo "fideo" y hay muchas marcas, o dijo la marca y hay
+  // varias presentaciones/unidades de esa marca), se muestran TODAS las
+  // opciones para elegir — la lista del selector scrollea si hace falta.
   const claros = disparos.filter(d => d.productos.length === 1);
-  const ambiguos = disparos.filter(d => d.productos.length > 1 && d.productos.length <= MAX_OPCIONES_DESAMBIGUAR);
-  const demasiadoAmbiguos = disparos.filter(d => d.productos.length > MAX_OPCIONES_DESAMBIGUAR);
+  const ambiguos = disparos.filter(d => d.productos.length > 1);
 
   claros.forEach(({productos, cantidad}) => agregarAlCarrito(productos[0].id, cantidad));
   if(claros.length){
     toast(`Agregué: ${claros.map(e=>e.cantidad+' '+e.productos[0].nombre).join(', ')}`, { icon:'🎤', duracion:4000 });
-  }
-  if(demasiadoAmbiguos.length){
-    const ejemplo = demasiadoAmbiguos[0].productos[0].nombre.split(' ').slice(0,2).join(' ').toLowerCase();
-    toast(`Tenés muchos productos parecidos a "${textoOriginal}". Decí también la marca (ej: "vendí ${ejemplo}") o tocá el producto en la lista.`, { icon:'🤔', duracion:5500 });
   }
   if(ambiguos.length){
     mostrarDesambiguacionVoz(ambiguos);
@@ -2734,7 +2728,7 @@ function mostrarDesambiguacionVoz(cola){
   abrirModal(`
     <div class="p-5">
       <div class="text-xl font-extrabold text-gray-900 mb-1">¿Cuál de estos?</div>
-      <div class="text-gray-500 text-sm mb-4">Escuché un producto que tenés repetido con distintas marcas.</div>
+      <div class="text-gray-500 text-sm mb-4">Encontré ${productos.length} opciones que podrían ser. Tocá la que vendiste.</div>
       <div class="flex flex-col gap-2">
         ${productos.map(p => `
           <button onclick="elegirProductoVoz('${p.id}', ${cantidad})" class="tap card p-3 flex items-center gap-3 text-left">
