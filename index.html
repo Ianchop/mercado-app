@@ -21,7 +21,7 @@
     GoogleAuthProvider, signInWithRedirect, getRedirectResult, signOut, sendPasswordResetEmail
   } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-auth.js";
   import {
-    getFirestore, doc, getDoc, setDoc, enableIndexedDbPersistence
+    getFirestore, doc, getDoc, setDoc, updateDoc, collection, getDocs, enableIndexedDbPersistence
   } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-firestore.js";
 
   const firebaseConfig = {
@@ -52,6 +52,25 @@
     const snap = await getDoc(doc(fbDb, 'negocios', uid));
     return snap.exists() ? snap.data() : null;
   };
+
+  // Suscripción mensual: se guarda separada del negocio para que el admin
+  // pueda ver/gestionar el estado de pago de todos sin tocar los datos
+  // de venta/stock/clientes de cada comercio (eso queda solo para el dueño).
+  window.fbCrearSuscripcion = (uid, datos) => setDoc(doc(fbDb, 'suscripciones', uid), datos);
+  window.fbCargarSuscripcion = async (uid) => {
+    const snap = await getDoc(doc(fbDb, 'suscripciones', uid));
+    return snap.exists() ? snap.data() : null;
+  };
+  window.fbListarSuscripciones = async () => {
+    const snap = await getDocs(collection(fbDb, 'suscripciones'));
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  };
+  window.fbMarcarPagado = (uid, datos) => updateDoc(doc(fbDb, 'suscripciones', uid), datos);
+  window.fbCargarConfigPagos = async () => {
+    const snap = await getDoc(doc(fbDb, 'config', 'pagos'));
+    return snap.exists() ? snap.data() : { linkMercadoPago: '' };
+  };
+  window.fbGuardarConfigPagos = (datos) => setDoc(doc(fbDb, 'config', 'pagos'), datos);
 
   // Al volver de la pantalla de Google, Firebase resuelve esto solo; acá
   // solo capturamos el error si algo salió mal (ej: dominio no autorizado)
@@ -195,6 +214,34 @@ function estadoVacio(){
 let state = estadoVacio();
 let usuarioFirebase = null; // usuario de Firebase logueado (o null)
 let sesionLista = false; // true recién cuando Firebase nos confirmó si hay sesión o no
+
+/* ====================== SUSCRIPCIÓN ($5.000/mes por Mercado Pago) ======================
+   Este mail es solo para decidir QUÉ PANTALLA mostrar en el cliente (comodidad de UI).
+   La seguridad de verdad está en las reglas de Firestore, que chequean el mismo mail
+   del lado del servidor: aunque alguien edite este archivo, no puede leer ni tocar
+   la suscripción de otro negocio ni marcarse a sí mismo como pagado. */
+const ADMIN_EMAIL = 'psocikian@gmail.com';
+function esAdminActual(){ return !!(usuarioFirebase && usuarioFirebase.email === ADMIN_EMAIL); }
+
+let suscripcionActual = null; // suscripción del negocio logueado (dueños)
+let listaSuscripciones = [];  // todas las suscripciones (solo panel admin)
+let configPagos = { linkMercadoPago: '' };
+
+function suscripcionValida(s){
+  if(!s || !s.proximoVencimiento) return false;
+  return s.proximoVencimiento >= new Date().toISOString().slice(0,10);
+}
+function calcularProximoVencimiento(){
+  const d = new Date();
+  d.setMonth(d.getMonth() + 1);
+  return d.toISOString().slice(0,10);
+}
+function estadoSuscripcionInfo(s){
+  const hoy = new Date().toISOString().slice(0,10);
+  if(!s || !s.proximoVencimiento) return { texto: 'Nunca pagó', bg:'#fef2f2', color:'#dc2626' };
+  if(s.proximoVencimiento < hoy) return { texto: `Vencido (${formatearFechaCorta(s.proximoVencimiento)})`, bg:'#fef2f2', color:'#dc2626' };
+  return { texto: `Activo hasta ${formatearFechaCorta(s.proximoVencimiento)}`, bg:'#ecfdf5', color:'#059669' };
+}
 
 function migrarProductos(){
   state.productos.forEach(p => {
@@ -426,14 +473,31 @@ window.addEventListener('DOMContentLoaded', () => {
   renderApp(); // pantalla de carga mientras Firebase confirma la sesión
   window.fbOnCambioAuth(async (user) => {
     usuarioFirebase = user;
+    suscripcionActual = null;
+    listaSuscripciones = [];
     if(user){
-      try{
-        const datos = await window.fbCargarNegocio(user.uid);
-        state = datos ? { ...estadoVacio(), ...datos } : estadoVacio();
-        migrarProductos();
-      }catch(e){
-        state = estadoVacio();
-        toast('No pudimos cargar tus datos. Revisá tu conexión.', { icon:'⚠️', duracion:4500 });
+      try{ configPagos = await window.fbCargarConfigPagos(); }catch(e){ configPagos = { linkMercadoPago:'' }; }
+      if(user.email === ADMIN_EMAIL){
+        try{ listaSuscripciones = await window.fbListarSuscripciones(); }catch(e){ listaSuscripciones = []; }
+      } else {
+        try{
+          const datos = await window.fbCargarNegocio(user.uid);
+          state = datos ? { ...estadoVacio(), ...datos } : estadoVacio();
+          migrarProductos();
+          if(state.negocio){
+            suscripcionActual = await window.fbCargarSuscripcion(user.uid);
+            if(!suscripcionActual){
+              // Negocio creado antes de que existiera la suscripción (o algo falló al
+              // crearla): la generamos ahora como "sin pagar" para que quede visible
+              // en el panel admin y el dueño pueda activarla.
+              suscripcionActual = { email: user.email, nombreNegocio: state.negocio.nombre, tipo: state.negocio.tipo, fechaCreacion: Date.now(), proximoVencimiento: '' };
+              window.fbCrearSuscripcion(user.uid, suscripcionActual).catch(() => {});
+            }
+          }
+        }catch(e){
+          state = estadoVacio();
+          toast('No pudimos cargar tus datos. Revisá tu conexión.', { icon:'⚠️', duracion:4500 });
+        }
       }
     } else {
       state = estadoVacio();
@@ -480,8 +544,16 @@ function renderApp(){
     app.innerHTML = vistaLogin();
     return;
   }
+  if(esAdminActual()){
+    app.innerHTML = vistaAdmin();
+    return;
+  }
   if(!state.negocio){
     app.innerHTML = vistaOnboarding();
+    return;
+  }
+  if(!suscripcionValida(suscripcionActual)){
+    app.innerHTML = vistaPago();
     return;
   }
   const ruta = (location.hash || '#/inicio').replace('#/','');
@@ -634,9 +706,93 @@ function finalizarOnboarding(tipo){
   state.negocio = { nombre: onboardingNombre, tipo };
   state.productos = crearProductosSeed(tipo);
   guardar();
-  toast(`¡Listo! Ya cargamos ${state.productos.length} productos de ejemplo para que empieces`, {icon:'🎉', duracion:4500});
+  suscripcionActual = { email: usuarioFirebase.email, nombreNegocio: onboardingNombre, tipo, fechaCreacion: Date.now(), proximoVencimiento: '' };
+  window.fbCrearSuscripcion(usuarioFirebase.uid, suscripcionActual).catch(() => {});
   ir('#/inicio');
   renderApp();
+}
+
+/* ====================== SUSCRIPCIÓN: pantalla de pago (dueños) ====================== */
+function vistaPago(){
+  const yaVencio = !!(suscripcionActual && suscripcionActual.proximoVencimiento);
+  const link = configPagos.linkMercadoPago || '';
+  return `
+  <div class="min-h-screen flex flex-col items-center justify-center px-6 text-center">
+    <div class="text-6xl mb-4">💳</div>
+    <h1 class="text-2xl font-extrabold text-gray-900 mb-2">${yaVencio ? 'Tu suscripción venció' : 'Activá tu cuenta'}</h1>
+    <p class="text-gray-500 mb-8 text-lg">
+      ${yaVencio
+        ? `Venció el ${formatearFechaCorta(suscripcionActual.proximoVencimiento)}. Renovala para seguir usando ${state.negocio ? state.negocio.nombre : 'tu negocio'}.`
+        : 'Para empezar a usar tu negocio, activá tu suscripción de $5.000 por mes.'}
+    </p>
+    ${link
+      ? `<a href="${link}" target="_blank" rel="noopener" class="tap w-full bg-indigo-700 text-white font-bold text-xl py-4 rounded-2xl shadow-lg mb-4 block">💳 Pagar suscripción — $5.000/mes</a>`
+      : `<div class="card w-full p-4 mb-4 text-gray-400">El administrador todavía no cargó el link de pago. Volvé a intentarlo más tarde.</div>`}
+    <div class="card w-full p-5 text-left mb-4">
+      <div class="font-bold text-gray-700 mb-1">¿Ya pagaste?</div>
+      <div class="text-gray-500 text-sm">La confirmación es manual y puede tardar unas horas. En cuanto se confirme, vas a poder entrar normalmente con este mismo mail.</div>
+    </div>
+    <button onclick="cerrarSesionApp()" class="text-gray-400 font-semibold">Cerrar sesión</button>
+  </div>`;
+}
+
+/* ====================== PANEL DE ADMINISTRADOR ====================== */
+function vistaAdmin(){
+  const activos = listaSuscripciones.filter(s => suscripcionValida(s)).length;
+  return `
+  <div class="px-4 pt-5 pb-3 flex items-center justify-between">
+    <div>
+      <div class="text-xl font-extrabold text-gray-900">👑 Panel de administrador</div>
+      <div class="text-gray-400 text-sm">${usuarioFirebase.email}</div>
+    </div>
+    <button onclick="cerrarSesionApp()" class="tap w-11 h-11 rounded-full bg-white card flex items-center justify-center text-xl">🚪</button>
+  </div>
+  <div class="px-4 pb-24">
+    <div class="card p-4 mb-4">
+      <div class="text-gray-500 text-sm mb-1">Negocios con suscripción activa</div>
+      <div class="text-3xl font-extrabold text-gray-900">${activos} / ${listaSuscripciones.length}</div>
+    </div>
+    <button onclick="mostrarConfigPagoLink()" class="tap w-full bg-white border-2 border-gray-200 text-gray-700 font-bold py-3.5 rounded-2xl mb-4">🔗 Configurar link de pago (Mercado Pago)</button>
+    <div class="section-label mb-2">Negocios (${listaSuscripciones.length})</div>
+    ${listaSuscripciones.length ? listaSuscripciones.slice().sort((a,b) => (a.nombreNegocio||'').localeCompare(b.nombreNegocio||'')).map(s => {
+      const info = estadoSuscripcionInfo(s);
+      return `
+      <div class="card p-4 mb-3">
+        <div class="font-bold text-gray-800">${s.nombreNegocio || '(sin nombre)'}</div>
+        <div class="text-gray-400 text-sm mb-2">${s.email || ''} · ${nombreRubro(s.tipo)}</div>
+        <div class="badge-venc inline-block mb-3" style="background:${info.bg};color:${info.color};">${info.texto}</div>
+        <button onclick="marcarNegocioPagado('${s.id}')" class="tap w-full bg-green-600 text-white font-bold py-2.5 rounded-xl text-sm">✅ Marcar como pagado (hasta ${formatearFechaCorta(calcularProximoVencimiento())})</button>
+      </div>`;
+    }).join('') : `<div class="text-center text-gray-400 py-16">Todavía no hay negocios registrados</div>`}
+  </div>`;
+}
+function marcarNegocioPagado(uidNegocio){
+  const proximoVencimiento = calcularProximoVencimiento();
+  const hoy = new Date().toISOString().slice(0,10);
+  window.fbMarcarPagado(uidNegocio, { proximoVencimiento, ultimoPago: hoy })
+    .then(async () => {
+      toast('Marcado como pagado', {icon:'✅'});
+      listaSuscripciones = await window.fbListarSuscripciones();
+      renderApp();
+    })
+    .catch(() => toast('No se pudo actualizar. Revisá tu conexión.', {icon:'⚠️', duracion:4000}));
+}
+function mostrarConfigPagoLink(){
+  abrirModal(`
+    <div class="p-5">
+      <div class="text-xl font-extrabold text-gray-900 mb-1">Link de pago de Mercado Pago</div>
+      <div class="text-gray-500 text-sm mb-4">Pegá acá el link de suscripción/pago recurrente que creaste en tu cuenta de Mercado Pago. Se les va a mostrar a los negocios cuando tengan que pagar.</div>
+      <input id="link-pago-input" value="${configPagos.linkMercadoPago||''}" placeholder="https://www.mercadopago.com.ar/..." class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg mb-4" />
+      <button onclick="guardarConfigPagoLink()" class="tap w-full bg-indigo-700 text-white font-bold py-4 rounded-2xl text-lg">Guardar</button>
+    </div>
+  `);
+}
+function guardarConfigPagoLink(){
+  const link = document.getElementById('link-pago-input').value.trim();
+  configPagos = { linkMercadoPago: link };
+  window.fbGuardarConfigPagos(configPagos)
+    .then(() => { toast('Link guardado', {icon:'✅'}); cerrarModal(); })
+    .catch(() => toast('No se pudo guardar. Revisá tu conexión.', {icon:'⚠️', duracion:4000}));
 }
 
 /* ====================== CABECERA Y NAV ====================== */
