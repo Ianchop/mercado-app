@@ -544,6 +544,10 @@ window.addEventListener('DOMContentLoaded', () => {
     listaSuscripciones = [];
     pantallaCrearPassword = false;
     errorCargaDatos = false;
+    // Todo este bloque va blindado: si algo revienta acá adentro que no
+    // esperábamos, no queremos que la página quede en blanco para siempre.
+    // Mejor mostrar la pantalla de "no pudimos cargar" con el error real.
+    try{
     if(user){
       // Si entró con Google y todavía no tiene una contraseña vinculada a la
       // cuenta, lo mandamos a crearla antes de dejarlo pasar a ningún lado.
@@ -591,6 +595,10 @@ window.addEventListener('DOMContentLoaded', () => {
         vinculandoGoogleEmail = (window.__errorRedirectGoogle.customData && window.__errorRedirectGoogle.customData.email) || '';
         window.__credencialGooglePendiente = window.fbCredencialGoogleDeError(window.__errorRedirectGoogle);
       }
+    }
+    }catch(e){
+      window.__ultimoErrorGlobal = 'Error al procesar sesión: ' + ((e && (e.code || e.message)) || e);
+      errorCargaDatos = true;
     }
     sesionLista = true;
     aplicarTamanoLetra();
@@ -698,7 +706,8 @@ function vistaErrorCarga(){
   <div class="min-h-screen flex flex-col items-center justify-center px-6 text-center">
     <div class="text-6xl mb-4">📡</div>
     <h1 class="text-2xl font-extrabold text-gray-900 mb-2">No pudimos cargar tus datos</h1>
-    <p class="text-gray-500 mb-8 text-lg">Revisá tu conexión a internet e intentá de nuevo. Tus datos están a salvo en la nube, no se perdió nada.</p>
+    <p class="text-gray-500 mb-4 text-lg">Revisá tu conexión a internet e intentá de nuevo. Tus datos están a salvo en la nube, no se perdió nada.</p>
+    ${window.__ultimoErrorGlobal ? `<div class="card w-full p-3 mb-4 text-left text-sm text-gray-400">${window.__ultimoErrorGlobal}</div>` : ''}
     <button onclick="location.reload()" class="tap w-full bg-indigo-700 text-white font-bold text-xl py-4 rounded-2xl shadow-lg mb-4">Reintentar</button>
     <button onclick="cerrarSesionApp()" class="text-gray-400 font-semibold">Cerrar sesión</button>
   </div>`;
