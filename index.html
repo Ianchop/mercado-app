@@ -257,6 +257,7 @@ let configPagos = { linkMercadoPago: '' };
    pantalla correspondiente ANTES que cualquier otra cosa (admin, onboarding, etc). */
 let pantallaCrearPassword = false; // true: logueado con Google pero sin contraseña propia todavía
 let vinculandoGoogleEmail = '';    // no vacío: el mail ya tenía cuenta con contraseña, hay que confirmarla para unir Google
+let errorCargaDatos = false;       // true: no se pudieron cargar los datos del negocio (conexión lenta/caída) — no seguir a onboarding para no pisar datos reales
 
 function suscripcionValida(s){
   if(!s || !s.proximoVencimiento) return false;
@@ -299,6 +300,17 @@ function guardar(){
 }
 
 function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
+
+// Con conexión lenta o inestable (muy común en el celular de un comercio de
+// barrio), una consulta a Firestore puede quedar esperando sin resolver
+// nunca. Sin este límite, la app se queda trabada en "Cargando..." para
+// siempre. Con el límite, como mucho falla y deja reintentar.
+function conTimeout(promesa, ms = 10000){
+  return Promise.race([
+    promesa,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('tiempo-agotado')), ms))
+  ]);
+}
 
 function money(n){
   n = Math.round(Number(n)||0);
@@ -507,32 +519,43 @@ window.addEventListener('DOMContentLoaded', () => {
     suscripcionActual = null;
     listaSuscripciones = [];
     pantallaCrearPassword = false;
+    errorCargaDatos = false;
     if(user){
       // Si entró con Google y todavía no tiene una contraseña vinculada a la
       // cuenta, lo mandamos a crearla antes de dejarlo pasar a ningún lado.
       const tienePassword = user.providerData.some(p => p.providerId === 'password');
       if(!tienePassword) pantallaCrearPassword = true;
-      try{ configPagos = await window.fbCargarConfigPagos(); }catch(e){ configPagos = { linkMercadoPago:'' }; }
+      try{ configPagos = await conTimeout(window.fbCargarConfigPagos()); }catch(e){ configPagos = { linkMercadoPago:'' }; }
       if(user.email === ADMIN_EMAIL){
-        try{ listaSuscripciones = await window.fbListarSuscripciones(); }catch(e){ listaSuscripciones = []; }
+        try{ listaSuscripciones = await conTimeout(window.fbListarSuscripciones()); }catch(e){ listaSuscripciones = []; }
       } else {
         try{
-          const datos = await window.fbCargarNegocio(user.uid);
+          const datos = await conTimeout(window.fbCargarNegocio(user.uid));
           state = datos ? { ...estadoVacio(), ...datos } : estadoVacio();
           migrarProductos();
           if(state.negocio){
-            suscripcionActual = await window.fbCargarSuscripcion(user.uid);
-            if(!suscripcionActual){
-              // Negocio creado antes de que existiera la suscripción (o algo falló al
-              // crearla): la generamos ahora como "sin pagar" para que quede visible
-              // en el panel admin y el dueño pueda activarla.
-              suscripcionActual = { email: user.email, nombreNegocio: state.negocio.nombre, tipo: state.negocio.tipo, fechaCreacion: Date.now(), proximoVencimiento: '' };
-              window.fbCrearSuscripcion(user.uid, suscripcionActual).catch(() => {});
+            try{
+              suscripcionActual = await conTimeout(window.fbCargarSuscripcion(user.uid));
+              if(!suscripcionActual){
+                // Negocio creado antes de que existiera la suscripción (o algo falló al
+                // crearla): la generamos ahora como "sin pagar" para que quede visible
+                // en el panel admin y el dueño pueda activarla.
+                suscripcionActual = { email: user.email, nombreNegocio: state.negocio.nombre, tipo: state.negocio.tipo, fechaCreacion: Date.now(), proximoVencimiento: '' };
+                window.fbCrearSuscripcion(user.uid, suscripcionActual).catch(() => {});
+              }
+            }catch(e){
+              // No se pudo confirmar el estado de pago (conexión lenta/caída): dejamos
+              // suscripcionActual en null, que bloquea el acceso (vistaPago) en vez de
+              // regalarlo. No es ideal, pero es la opción seguridad-primero.
+              suscripcionActual = null;
             }
           }
         }catch(e){
-          state = estadoVacio();
-          toast('No pudimos cargar tus datos. Revisá tu conexión.', { icon:'⚠️', duracion:4500 });
+          // OJO: nunca resetear "state" a vacío acá. Si esto fallara y siguiéramos
+          // como si el negocio no existiera, el onboarding podría llegar a
+          // sobrescribir en la nube los datos reales de un negocio ya existente.
+          // Mejor mostrar "no pudimos cargar" y dejar reintentar.
+          errorCargaDatos = true;
         }
       }
     } else {
@@ -595,6 +618,10 @@ function renderApp(){
     app.innerHTML = vistaCrearPassword();
     return;
   }
+  if(errorCargaDatos){
+    app.innerHTML = vistaErrorCarga();
+    return;
+  }
   if(esAdminActual()){
     app.innerHTML = vistaAdmin();
     return;
@@ -640,6 +667,16 @@ function vistaCargando(){
   <div class="min-h-screen flex flex-col items-center justify-center px-6 text-center">
     <div class="text-6xl mb-4">🏪</div>
     <div class="text-gray-400 font-semibold">Cargando...</div>
+  </div>`;
+}
+function vistaErrorCarga(){
+  return `
+  <div class="min-h-screen flex flex-col items-center justify-center px-6 text-center">
+    <div class="text-6xl mb-4">📡</div>
+    <h1 class="text-2xl font-extrabold text-gray-900 mb-2">No pudimos cargar tus datos</h1>
+    <p class="text-gray-500 mb-8 text-lg">Revisá tu conexión a internet e intentá de nuevo. Tus datos están a salvo en la nube, no se perdió nada.</p>
+    <button onclick="location.reload()" class="tap w-full bg-indigo-700 text-white font-bold text-xl py-4 rounded-2xl shadow-lg mb-4">Reintentar</button>
+    <button onclick="cerrarSesionApp()" class="text-gray-400 font-semibold">Cerrar sesión</button>
   </div>`;
 }
 let modoLogin = 'iniciar'; // 'iniciar' | 'registrar'
