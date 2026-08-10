@@ -23,7 +23,7 @@
     EmailAuthProvider, linkWithCredential
   } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-auth.js";
   import {
-    getFirestore, doc, getDoc, setDoc, updateDoc, collection, getDocs, enableIndexedDbPersistence
+    getFirestore, doc, getDoc, getDocFromCache, setDoc, updateDoc, collection, getDocs, enableIndexedDbPersistence
   } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-firestore.js";
 
   const firebaseConfig = {
@@ -66,6 +66,13 @@
     const snap = await getDoc(doc(fbDb, 'negocios', uid));
     return snap.exists() ? snap.data() : null;
   };
+  // Lectura de emergencia SOLO de la copia local (sin tocar la red): para
+  // cuando no hay conexión y el intento normal de arriba se colgó o tardó
+  // demasiado. Nunca espera al servidor, así que resuelve al instante.
+  window.fbCargarNegocioDeCache = async (uid) => {
+    const snap = await getDocFromCache(doc(fbDb, 'negocios', uid));
+    return snap.exists() ? snap.data() : null;
+  };
 
   // Suscripción mensual: se guarda separada del negocio para que el admin
   // pueda ver/gestionar el estado de pago de todos sin tocar los datos
@@ -73,6 +80,10 @@
   window.fbCrearSuscripcion = (uid, datos) => setDoc(doc(fbDb, 'suscripciones', uid), datos);
   window.fbCargarSuscripcion = async (uid) => {
     const snap = await getDoc(doc(fbDb, 'suscripciones', uid));
+    return snap.exists() ? snap.data() : null;
+  };
+  window.fbCargarSuscripcionDeCache = async (uid) => {
+    const snap = await getDocFromCache(doc(fbDb, 'suscripciones', uid));
     return snap.exists() ? snap.data() : null;
   };
   window.fbListarSuscripciones = async () => {
@@ -285,6 +296,21 @@ let pantallaCrearPassword = false; // true: logueado con Google pero sin contras
 let vinculandoGoogleEmail = '';    // no vacío: el mail ya tenía cuenta con contraseña, hay que confirmarla para unir Google
 let errorCargaDatos = false;       // true: no se pudieron cargar los datos del negocio (conexión lenta/caída) — no seguir a onboarding para no pisar datos reales
 let modoDemoAdmin = false;         // true: el admin está viendo la app normal (su propio negocio de demo) en vez del panel
+
+/* ====================== SIN CONEXIÓN ======================
+   Firestore ya guarda una copia local y sube los cambios solo en cuanto
+   vuelve la señal (enableIndexedDbPersistence, más arriba). Esto solo
+   agrega el aviso visual para que el que atiende sepa que puede seguir
+   vendiendo tranquilo aunque se corte el wifi/datos. */
+let conexionOnline = navigator.onLine;
+window.addEventListener('online', () => { conexionOnline = true; renderApp(); });
+window.addEventListener('offline', () => { conexionOnline = false; renderApp(); });
+function bannerSinConexion(){
+  if(conexionOnline) return '';
+  return `<div class="bg-gray-800 text-white text-center text-sm font-bold py-2 px-4 flex items-center justify-center gap-2">
+    ${icono('wifi-off','w-4 h-4')} Sin conexión — tus ventas se guardan igual y se suben solas cuando vuelva
+  </div>`;
+}
 
 function suscripcionValida(s){
   if(!s || !s.proximoVencimiento) return false;
@@ -596,32 +622,49 @@ window.addEventListener('DOMContentLoaded', () => {
           state = estadoVacio();
         }
       } else {
+        // Estrategia sin conexión: primero se intenta por red (con límite de
+        // tiempo). Si eso falla —celular sin señal, wifi caído, lo que sea—
+        // se intenta una lectura de emergencia SOLO de la copia local del
+        // celular (nunca toca la red, resuelve al instante). Así, si el
+        // negocio ya se había abierto antes en este celular, puede seguir
+        // vendiendo offline: los cambios quedan guardados localmente y
+        // Firestore los sube solo en cuanto vuelve la conexión.
+        let datos = null, seLogroLeer = false;
         try{
-          const datos = await conTimeout(window.fbCargarNegocio(user.uid));
+          datos = await conTimeout(window.fbCargarNegocio(user.uid));
+          seLogroLeer = true;
+        }catch(e){
+          try{ datos = await window.fbCargarNegocioDeCache(user.uid); seLogroLeer = true; }
+          catch(e2){ seLogroLeer = false; }
+        }
+        if(seLogroLeer){
           state = datos ? { ...estadoVacio(), ...datos } : estadoVacio();
           migrarProductos();
           if(state.negocio){
+            // Acá hay que distinguir bien dos casos para no arriesgar la cuenta
+            // corriente/suscripción real de nadie:
+            // 1) Consultamos CON red y Firestore confirmó que el documento no
+            //    existe → recién ahí es seguro crear uno nuevo "sin pagar".
+            // 2) No hay red y tampoco hay copia local de la suscripción → es
+            //    ambiguo (puede que sí exista en el servidor y nunca se cacheó
+            //    acá), así que NO se crea nada: queda sin confirmar y bloquea
+            //    el acceso (vistaPago) en vez de arriesgarse a pisar datos.
+            let confirmadoAusenteConRed = false;
             try{
               suscripcionActual = await conTimeout(window.fbCargarSuscripcion(user.uid));
-              if(!suscripcionActual){
-                // Negocio creado antes de que existiera la suscripción (o algo falló al
-                // crearla): la generamos ahora como "sin pagar" para que quede visible
-                // en el panel admin y el dueño pueda activarla.
-                suscripcionActual = { email: user.email, nombreNegocio: state.negocio.nombre, tipo: state.negocio.tipo, fechaCreacion: Date.now(), proximoVencimiento: '' };
-                window.fbCrearSuscripcion(user.uid, suscripcionActual).catch(() => {});
-              }
+              if(suscripcionActual === null) confirmadoAusenteConRed = true;
             }catch(e){
-              // No se pudo confirmar el estado de pago (conexión lenta/caída): dejamos
-              // suscripcionActual en null, que bloquea el acceso (vistaPago) en vez de
-              // regalarlo. No es ideal, pero es la opción seguridad-primero.
-              suscripcionActual = null;
+              suscripcionActual = await window.fbCargarSuscripcionDeCache(user.uid).catch(() => null);
+            }
+            if(confirmadoAusenteConRed){
+              suscripcionActual = { email: user.email, nombreNegocio: state.negocio.nombre, tipo: state.negocio.tipo, fechaCreacion: Date.now(), proximoVencimiento: '' };
+              window.fbCrearSuscripcion(user.uid, suscripcionActual).catch(() => {});
             }
           }
-        }catch(e){
-          // OJO: nunca resetear "state" a vacío acá. Si esto fallara y siguiéramos
-          // como si el negocio no existiera, el onboarding podría llegar a
-          // sobrescribir en la nube los datos reales de un negocio ya existente.
-          // Mejor mostrar "no pudimos cargar" y dejar reintentar.
+        } else {
+          // Ni red ni copia local: mejor mostrar "no pudimos cargar" y dejar
+          // reintentar, que arriesgarse a pisar datos reales de un negocio
+          // que ya existe pero no pudimos leer.
           errorCargaDatos = true;
         }
       }
@@ -728,6 +771,7 @@ function renderApp(){
     default: contenido = vistaInicio();
   }
   mostrar(`
+    ${bannerSinConexion()}
     ${esAdminActual() && modoDemoAdmin ? `
     <div class="bg-amber-500 text-white text-center text-sm font-bold py-2 px-4 flex items-center justify-center gap-3">
       <span class="flex items-center gap-1.5">${icono('crown','w-4 h-4')} Modo demo (cuenta admin)</span>
@@ -2597,7 +2641,7 @@ function vistaRecepcion(){
 
   <div class="grid grid-cols-2 gap-2 mb-3">
     <button onclick="escanearParaRecepcion()" class="tap bg-indigo-50 border-2 border-indigo-100 text-indigo-700 font-bold text-lg py-4 rounded-2xl flex items-center justify-center gap-2">${icono('scan-line','w-5 h-5')} Escanear</button>
-    <button onclick="mostrarFormProducto(null, {proveedorId: prov.id})" class="tap bg-white border-2 border-gray-200 text-gray-700 font-bold text-lg py-4 rounded-2xl flex items-center justify-center gap-2">${icono('plus','w-5 h-5')} Producto nuevo</button>
+    <button onclick="mostrarFormProducto(null, {proveedorId: '${prov.id}'})" class="tap bg-white border-2 border-gray-200 text-gray-700 font-bold text-lg py-4 rounded-2xl flex items-center justify-center gap-2">${icono('plus','w-5 h-5')} Producto nuevo</button>
   </div>
 
   ${productosProv.length ? `
