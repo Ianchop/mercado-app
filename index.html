@@ -2897,7 +2897,24 @@ function vistaStock(){
   <button onclick="mostrarImportarCatalogo()" class="tap w-full bg-white text-indigo-700 border-2 border-dashed border-indigo-200 font-bold text-base py-3 rounded-2xl mb-4 flex items-center justify-center gap-2">${icono('download','w-5 h-5')} Importar catálogo completo (${CATALOGO_PRODUCTOS.length} productos)</button>
 
   ${listaHTML}
+
+  ${usuarioEsAdmin() && state.productos.length ? `
+  <button onclick="eliminarTodoStock()" class="tap w-full text-red-500 font-semibold py-3 mt-6 text-sm">🗑️ Eliminar todo el stock</button>
+  ` : ''}
   `;
+}
+function eliminarTodoStock(){
+  const cantidad = state.productos.length;
+  confirmarAccion(`¿Seguro? Se van a borrar los ${cantidad} productos de tu stock (y los combos que los usan). Esto no se puede deshacer.`, () => {
+    confirmarAccion('Última confirmación: ¿borrar todo el stock de verdad?', () => {
+      state.productos = [];
+      state.combos = [];
+      guardar();
+      cerrarModal();
+      renderApp();
+      toast('Se borró todo el stock', { icon:'🗑️' });
+    }, 'Sí, borrar todo el stock');
+  }, 'Continuar');
 }
 function tarjetaProductoStock(p){
   const ratio = p.stock / Math.max(1,p.stockMin);
