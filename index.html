@@ -252,6 +252,8 @@ function estadoVacio(){
     cierres: [],
     eliminaciones: [],
     gastos: [],
+    recepciones: [],          // historial de recepciones de mercadería cerradas
+    proveedorMovimientos: [], // cuenta corriente con proveedores: {proveedorId, tipo:'debe'|'pago', monto, fecha, detalle}
     usuarios: [],
     usuarioActualId: '',
     metaDiaria: 0,
@@ -717,6 +719,7 @@ function renderApp(){
     case 'vencimientos': contenido = vistaVencimientos(); break;
     case 'cierre': contenido = vistaCierre(); break;
     case 'proveedores': contenido = vistaProveedores(); break;
+    case 'recepcion': contenido = vistaRecepcion(); break;
     case 'gastos': contenido = vistaGastos(); break;
     case 'mas': contenido = vistaMas(); break;
     case 'clientes': contenido = vistaClientes(); break;
@@ -2306,6 +2309,7 @@ function guardarCierre(){
 
 /* ====================== GASTOS DEL NEGOCIO ====================== */
 const GASTO_CATEGORIAS = [
+  { id:'mercaderia', emoji:'📦', nombre:'Mercadería' },
   { id:'alquiler', emoji:'🏠', nombre:'Alquiler' },
   { id:'sueldos', emoji:'👥', nombre:'Sueldos' },
   { id:'servicios', emoji:'💡', nombre:'Servicios' },
@@ -2398,20 +2402,34 @@ function eliminarGasto(id){
 
 /* ====================== PROVEEDORES ====================== */
 function vistaProveedores(){
+  const deudaTotal = state.proveedores.reduce((s,p)=>s+(p.cuentaCorriente||0),0);
   return `
+  ${deudaTotal > 0 ? `
+  <div class="card p-4 mt-2 mb-3 bg-amber-50">
+    <div class="text-amber-700 font-semibold">Les debés a tus proveedores</div>
+    <div class="text-3xl font-extrabold text-amber-700">${money(deudaTotal)}</div>
+  </div>` : ''}
   <button onclick="mostrarFormProveedor()" class="tap w-full bg-indigo-700 text-white font-bold text-lg py-3.5 rounded-2xl mt-2 mb-4">+ Nuevo proveedor</button>
   ${state.proveedores.length ? state.proveedores.map(prov => {
     const productosProv = state.productos.filter(p=>p.proveedorId===prov.id);
     const bajoStockProv = productosProv.filter(p=>p.stock<=p.stockMin);
+    const deuda = prov.cuentaCorriente || 0;
     return `
     <div class="card p-4 mb-3">
       <div class="flex items-center justify-between mb-2 gap-2">
-        <button onclick="mostrarFormProveedor('${prov.id}')" class="text-left flex-1 min-w-0">
-          <div class="font-bold text-gray-800 text-lg truncate">🚚 ${prov.nombre}</div>
-          <div class="text-gray-400 text-sm">${prov.telefono || 'Sin teléfono'}</div>
+        <button onclick="mostrarFormProveedor('${prov.id}')" class="text-left flex-1 min-w-0 flex items-center gap-2">
+          <span class="text-gray-400 flex-shrink-0">${icono('truck','w-5 h-5')}</span>
+          <span class="min-w-0">
+            <div class="font-bold text-gray-800 text-lg truncate">${prov.nombre}</div>
+            <div class="text-gray-400 text-sm">${prov.telefono || 'Sin teléfono'}</div>
+          </span>
         </button>
         ${bajoStockProv.length ? `<span class="badge-venc whitespace-nowrap" style="background:#fef2f2;color:#dc2626;">${bajoStockProv.length} por pedir</span>` : ''}
       </div>
+      ${deuda > 0 ? `<div class="text-amber-700 font-bold text-sm mb-2">Le debés ${money(deuda)}</div>` : ''}
+      <button onclick="iniciarRecepcion('${prov.id}')" class="tap w-full bg-indigo-700 text-white font-bold py-2.5 rounded-xl mb-2 flex items-center justify-center gap-1.5">${icono('package-plus','w-4 h-4')} Recibir mercadería</button>
+      ${deuda > 0 ? `<button onclick="registrarPagoProveedor('${prov.id}')" class="tap w-full bg-green-50 text-green-700 font-bold py-2.5 rounded-xl mb-2 flex items-center justify-center gap-1.5">${icono('circle-dollar-sign','w-4 h-4')} Registrar pago</button>` : ''}
+      ${state.recepciones.some(r=>r.proveedorId===prov.id) ? `<button onclick="verHistorialProveedor('${prov.id}')" class="tap w-full bg-white border-2 border-gray-200 text-gray-600 font-bold py-2.5 rounded-xl mb-2 text-sm">Ver historial de compras</button>` : ''}
       ${bajoStockProv.length ? `
         <div class="flex flex-col gap-1 mb-3">
           ${bajoStockProv.map(p=>`<div class="flex items-center justify-between text-gray-600 text-sm"><span>${p.emoji} ${p.nombre}</span><span>Quedan ${p.stock}</span></div>`).join('')}
@@ -2419,7 +2437,7 @@ function vistaProveedores(){
         ${prov.telefono ? `<button onclick="pedirReposicion('${prov.id}')" class="tap w-full bg-green-50 text-green-700 font-bold py-2.5 rounded-xl">📤 Pedir reposición por WhatsApp</button>` : `<div class="text-amber-600 text-sm">Agregale un teléfono para poder pedirle por WhatsApp</div>`}
       ` : prov.telefono ? `<a href="https://wa.me/${limpiarTelefono(prov.telefono)}" target="_blank" class="tap w-full bg-indigo-50 text-indigo-700 font-bold py-2.5 rounded-xl text-center block">💬 Contactar</a>` : ''}
     </div>`;
-  }).join('') : `<div class="text-center py-16 text-gray-400"><div class="text-5xl mb-3">🚚</div>Todavía no cargaste proveedores</div>`}
+  }).join('') : `<div class="text-center py-16 text-gray-400"><div class="mb-3 flex justify-center">${icono('truck','w-12 h-12')}</div>Todavía no cargaste proveedores</div>`}
   `;
 }
 function mostrarFormProveedor(id = null){
@@ -2464,6 +2482,299 @@ function pedirReposicion(proveedorId){
   const lineas = productos.map(p => `- ${p.nombre}${detalleProducto(p)?' ('+detalleProducto(p)+')':''}`).join('\n');
   const msg = `Hola! Soy de ${state.negocio.nombre}. Necesito reponer:\n${lineas}\n\n¡Gracias!`;
   window.open(`https://wa.me/${limpiarTelefono(prov.telefono)}?text=${encodeURIComponent(msg)}`, '_blank');
+}
+
+/* ====================== RECEPCIÓN DE MERCADERÍA ======================
+   El momento en que llega el camión del proveedor: cargar rápido lo que
+   llegó, detectar si algún costo subió respecto de la última compra, y
+   sugerir un nuevo precio de venta para no perder margen sin darse cuenta. */
+let recepcionProveedorId = '';       // proveedor de la recepción en curso
+let carritoRecepcion = {};           // productoId -> { cantidad, costoUnitario }
+let recepcionFotoBoleta = '';        // dataURL comprimido de la foto del comprobante (opcional)
+let recepcionFormaPago = 'efectivo'; // 'efectivo' | 'cuenta_corriente' | 'cheque'
+let recepcionFechaCheque = '';
+let recepcionActualizarPrecios = true;
+
+function iniciarRecepcion(proveedorId){
+  recepcionProveedorId = proveedorId;
+  carritoRecepcion = {};
+  recepcionFotoBoleta = '';
+  recepcionFormaPago = 'efectivo';
+  recepcionFechaCheque = '';
+  recepcionActualizarPrecios = true;
+  ir('#/recepcion');
+}
+function agregarRecepcionCarrito(productoId){
+  const p = state.productos.find(x=>x.id===productoId);
+  if(!p) return;
+  if(!carritoRecepcion[productoId]){
+    carritoRecepcion[productoId] = { cantidad: 1, costoUnitario: p.costo || 0 };
+  } else {
+    carritoRecepcion[productoId].cantidad += 1;
+  }
+  if(navigator.vibrate) navigator.vibrate(15);
+  renderApp();
+}
+function quitarRecepcionCarrito(productoId){
+  delete carritoRecepcion[productoId];
+  renderApp();
+}
+function cambiarCantidadRecepcion(productoId, valor){
+  const n = parseInt(valor) || 0;
+  if(n <= 0){ delete carritoRecepcion[productoId]; } else { carritoRecepcion[productoId].cantidad = n; }
+  renderApp();
+}
+function cambiarCostoRecepcion(productoId, valor){
+  const n = parseFloat(valor);
+  carritoRecepcion[productoId].costoUnitario = isNaN(n) ? 0 : n;
+  renderApp();
+}
+function escanearParaRecepcion(){
+  iniciarEscaneo((codigo) => {
+    const p = state.productos.find(x=>x.codigoBarras && x.codigoBarras === codigo);
+    if(p){
+      if(!p.proveedorId){ p.proveedorId = recepcionProveedorId; guardar(); }
+      agregarRecepcionCarrito(p.id);
+      toast(`${p.nombre} agregado`, {icon:'📷'});
+    } else {
+      toast('No encontramos ningún producto con ese código. Creá el producto primero.', {icon:'❓', duracion:4000});
+      mostrarFormProducto(null, { codigoBarras: codigo, proveedorId: recepcionProveedorId });
+    }
+  });
+}
+// Mantiene el mismo % de margen que ya tenía el producto, aplicado al costo nuevo.
+function calcularSugerenciaPrecio(producto, costoNuevo){
+  if(!producto.costo || producto.costo <= 0 || !producto.precio) return null;
+  const margen = producto.precio / producto.costo;
+  return Math.round((costoNuevo * margen) / 10) * 10;
+}
+// Solo guardamos la foto como respaldo adjunto (no hay lectura automática de
+// texto/OCR: eso necesitaría un servicio de IA con backend pago). Se
+// comprime en el celular antes de guardar para no pasarnos del límite de
+// tamaño de un documento en Firestore.
+function adjuntarFotoBoleta(event){
+  const file = event.target.files[0];
+  if(!file) return;
+  const lector = new FileReader();
+  lector.onload = (e) => {
+    const img = new Image();
+    img.onload = () => {
+      const escala = Math.min(1, 1000 / img.width);
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width * escala;
+      canvas.height = img.height * escala;
+      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+      recepcionFotoBoleta = canvas.toDataURL('image/jpeg', 0.6);
+      renderApp();
+      toast('Foto adjuntada', {icon:'📎'});
+    };
+    img.src = e.target.result;
+  };
+  lector.readAsDataURL(file);
+}
+function quitarFotoBoleta(){
+  recepcionFotoBoleta = '';
+  renderApp();
+}
+function vistaRecepcion(){
+  const prov = state.proveedores.find(x=>x.id===recepcionProveedorId);
+  if(!prov){
+    return `<div class="text-center py-20 text-gray-400">
+      <div class="mb-3 flex justify-center">${icono('truck','w-12 h-12')}</div>
+      Elegí un proveedor desde la pantalla de Proveedores para empezar una recepción.
+      <button onclick="ir('#/proveedores')" class="tap mt-4 bg-indigo-700 text-white font-bold py-3 px-6 rounded-2xl">Ir a Proveedores</button>
+    </div>`;
+  }
+  const items = Object.entries(carritoRecepcion);
+  const total = items.reduce((s,[,it]) => s + it.costoUnitario*it.cantidad, 0);
+  const productosProv = state.productos.filter(p => p.proveedorId === prov.id);
+
+  return `
+  <div class="card p-4 mt-2 mb-4 bg-indigo-50">
+    <div class="text-indigo-700 font-semibold flex items-center gap-2">${icono('truck','w-4 h-4')} Recepción de mercadería</div>
+    <div class="text-2xl font-extrabold text-gray-900">${prov.nombre}</div>
+  </div>
+
+  <div class="grid grid-cols-2 gap-2 mb-3">
+    <button onclick="escanearParaRecepcion()" class="tap bg-indigo-50 border-2 border-indigo-100 text-indigo-700 font-bold text-lg py-4 rounded-2xl flex items-center justify-center gap-2">${icono('scan-line','w-5 h-5')} Escanear</button>
+    <button onclick="mostrarFormProducto(null, {proveedorId: prov.id})" class="tap bg-white border-2 border-gray-200 text-gray-700 font-bold text-lg py-4 rounded-2xl flex items-center justify-center gap-2">${icono('plus','w-5 h-5')} Producto nuevo</button>
+  </div>
+
+  ${productosProv.length ? `
+  <div class="section-label mb-2">Productos de este proveedor</div>
+  <div class="grid cards-grid gap-3 mb-4">
+    ${productosProv.map(p => `
+      <button onclick="agregarRecepcionCarrito('${p.id}')" class="tap card p-4 flex flex-col items-center gap-1 relative">
+        ${carritoRecepcion[p.id] ? `<span class="absolute -top-2 -right-2 bg-indigo-700 text-white text-sm font-bold w-7 h-7 rounded-full flex items-center justify-center">${carritoRecepcion[p.id].cantidad}</span>` : ''}
+        <span class="text-4xl">${p.emoji}</span>
+        <span class="font-bold text-gray-800 text-center leading-tight">${p.nombre}</span>
+        <span class="text-gray-400 text-xs">Costo actual: ${money(p.costo||0)}</span>
+      </button>
+    `).join('')}
+  </div>` : `<div class="text-gray-400 text-sm mb-4">Este proveedor todavía no tiene productos asignados. Escaneá o cargá uno nuevo.</div>`}
+
+  ${items.length ? `
+  <div class="section-label mb-2">Mercadería recibida (${items.length})</div>
+  ${items.map(([id, it]) => {
+    const p = state.productos.find(x=>x.id===id);
+    if(!p) return '';
+    const costoAnterior = p.costo || 0;
+    const cambioPct = costoAnterior > 0 ? Math.round(((it.costoUnitario - costoAnterior) / costoAnterior) * 100) : 0;
+    const sugerido = calcularSugerenciaPrecio(p, it.costoUnitario);
+    return `
+    <div class="card p-4 mb-3">
+      <div class="flex items-center justify-between mb-2">
+        <div class="font-bold text-gray-800 flex items-center gap-2"><span class="text-2xl">${p.emoji}</span>${p.nombre}</div>
+        <button onclick="quitarRecepcionCarrito('${id}')" class="text-red-400">${icono('trash-2','w-4 h-4')}</button>
+      </div>
+      <div class="grid grid-cols-2 gap-2 mb-2">
+        <div>
+          <label class="text-gray-500 text-xs font-semibold">Cantidad recibida</label>
+          <input type="number" inputmode="numeric" value="${it.cantidad}" onchange="cambiarCantidadRecepcion('${id}', this.value)" class="w-full border-2 border-gray-200 rounded-xl px-3 py-2 text-lg mt-1" />
+        </div>
+        <div>
+          <label class="text-gray-500 text-xs font-semibold">Costo unitario</label>
+          <input type="number" inputmode="decimal" value="${it.costoUnitario}" onchange="cambiarCostoRecepcion('${id}', this.value)" class="w-full border-2 border-gray-200 rounded-xl px-3 py-2 text-lg mt-1" />
+        </div>
+      </div>
+      ${cambioPct !== 0 ? `
+      <div class="rounded-xl p-3 text-sm font-semibold ${cambioPct>0?'bg-red-50 text-red-600':'bg-emerald-50 text-emerald-700'}">
+        ${cambioPct>0 ? `⚠️ Aumento del ${cambioPct}% vs la última compra (antes ${money(costoAnterior)})` : `Bajó ${Math.abs(cambioPct)}% vs la última compra (antes ${money(costoAnterior)})`}
+        ${cambioPct>0 && sugerido ? `<div class="mt-1">💡 Sugerencia: subir el precio de venta a <b>${money(sugerido)}</b> para mantener tu margen.</div>` : ''}
+      </div>` : ''}
+    </div>`;
+  }).join('')}
+
+  <div class="card p-4 mb-3">
+    <label class="flex items-center gap-2 text-gray-700 font-semibold">
+      <input type="checkbox" ${recepcionActualizarPrecios?'checked':''} onchange="recepcionActualizarPrecios=this.checked;" class="w-5 h-5" />
+      Actualizar los precios de venta sugeridos
+    </label>
+  </div>
+
+  <div class="card p-4 mb-3">
+    <div class="font-bold text-gray-700 mb-2">Forma de pago</div>
+    <div class="grid grid-cols-3 gap-2 mb-2">
+      <button onclick="recepcionFormaPago='efectivo'; renderApp();" class="tap py-2.5 rounded-xl font-bold text-sm border-2 ${recepcionFormaPago==='efectivo'?'bg-indigo-700 text-white border-indigo-700':'bg-white text-gray-600 border-gray-200'}">Efectivo</button>
+      <button onclick="recepcionFormaPago='cuenta_corriente'; renderApp();" class="tap py-2.5 rounded-xl font-bold text-sm border-2 ${recepcionFormaPago==='cuenta_corriente'?'bg-indigo-700 text-white border-indigo-700':'bg-white text-gray-600 border-gray-200'}">Cuenta corriente</button>
+      <button onclick="recepcionFormaPago='cheque'; renderApp();" class="tap py-2.5 rounded-xl font-bold text-sm border-2 ${recepcionFormaPago==='cheque'?'bg-indigo-700 text-white border-indigo-700':'bg-white text-gray-600 border-gray-200'}">Cheque</button>
+    </div>
+    ${recepcionFormaPago==='cheque' ? `
+    <label class="text-gray-500 text-sm font-semibold">Fecha del cheque</label>
+    <input type="date" value="${recepcionFechaCheque}" onchange="recepcionFechaCheque=this.value;" class="w-full border-2 border-gray-200 rounded-xl px-3 py-2 text-lg mt-1" />
+    ` : ''}
+  </div>
+
+  <div class="card p-4 mb-3">
+    <div class="font-bold text-gray-700 mb-2">Foto de la boleta (opcional)</div>
+    ${recepcionFotoBoleta ? `
+      <img src="${recepcionFotoBoleta}" class="w-full rounded-xl mb-2" />
+      <button onclick="quitarFotoBoleta()" class="tap w-full bg-red-50 text-red-600 font-bold py-2.5 rounded-xl">Quitar foto</button>
+    ` : `
+      <input type="file" accept="image/*" capture="environment" id="input-foto-boleta" style="display:none" onchange="adjuntarFotoBoleta(event)" />
+      <button onclick="document.getElementById('input-foto-boleta').click()" class="tap w-full bg-white border-2 border-gray-200 text-gray-700 font-bold py-3 rounded-xl flex items-center justify-center gap-2">${icono('camera','w-5 h-5')} Sacar foto</button>
+    `}
+  </div>
+
+  <div class="card p-4 mb-4">
+    <div class="flex items-center justify-between mb-3">
+      <span class="font-bold text-gray-700 text-lg">Total</span>
+      <span class="text-2xl font-extrabold text-gray-900">${money(total)}</span>
+    </div>
+    <button onclick="confirmarRecepcion()" class="tap w-full bg-green-600 text-white font-extrabold text-lg py-4 rounded-2xl flex items-center justify-center gap-2">${icono('check-circle','w-5 h-5')} Guardar e incrementar stock</button>
+  </div>
+  ` : `<div class="text-center py-10 text-gray-400">Todavía no agregaste productos a esta recepción.</div>`}
+  <button onclick="ir('#/proveedores')" class="mt-2 mb-6 text-gray-400 font-semibold block mx-auto">← Volver a proveedores</button>
+  `;
+}
+function confirmarRecepcion(){
+  const items = Object.entries(carritoRecepcion);
+  if(!items.length){ toast('Agregá al menos un producto', {icon:'✍️'}); return; }
+  const prov = state.proveedores.find(x=>x.id===recepcionProveedorId);
+  if(!prov) return;
+  const total = items.reduce((s,[,it]) => s + it.costoUnitario*it.cantidad, 0);
+  const itemsGuardados = [];
+
+  items.forEach(([id, it]) => {
+    const p = state.productos.find(x=>x.id===id);
+    if(!p) return;
+    const costoAnterior = p.costo || 0;
+    itemsGuardados.push({ productoId: id, nombre: p.nombre, cantidad: it.cantidad, costoUnitario: it.costoUnitario, costoAnterior });
+    p.stock = (p.stock || 0) + it.cantidad;
+    if(recepcionActualizarPrecios && it.costoUnitario > costoAnterior){
+      const sugerido = calcularSugerenciaPrecio(p, it.costoUnitario);
+      if(sugerido) p.precio = sugerido;
+    }
+    p.costo = it.costoUnitario;
+  });
+
+  state.recepciones.push({
+    id: uid(),
+    proveedorId: prov.id,
+    proveedorNombre: prov.nombre,
+    fecha: Date.now(),
+    items: itemsGuardados,
+    total,
+    formaPago: recepcionFormaPago,
+    fechaCheque: recepcionFormaPago==='cheque' ? recepcionFechaCheque : '',
+    comprobanteFoto: recepcionFotoBoleta || ''
+  });
+
+  if(recepcionFormaPago === 'efectivo'){
+    state.gastos.push({ id: uid(), categoria:'mercaderia', descripcion:`Compra a ${prov.nombre}`, monto: total, fecha: Date.now() });
+  } else {
+    prov.cuentaCorriente = (prov.cuentaCorriente || 0) + total;
+    const detalle = recepcionFormaPago==='cheque' ? `Cheque${recepcionFechaCheque?' - vence '+formatearFechaCorta(recepcionFechaCheque):''}` : 'Compra en cuenta corriente';
+    state.proveedorMovimientos.push({ id: uid(), proveedorId: prov.id, tipo:'debe', monto: total, fecha: Date.now(), detalle });
+  }
+
+  guardar();
+  toast(`Recepción guardada: ${itemsGuardados.length} producto${itemsGuardados.length===1?'':'s'}, stock actualizado`, { icon:'✅', duracion:4500 });
+  carritoRecepcion = {};
+  recepcionFotoBoleta = '';
+  ir('#/proveedores');
+}
+function registrarPagoProveedor(proveedorId){
+  const prov = state.proveedores.find(x=>x.id===proveedorId);
+  if(!prov) return;
+  abrirModal(`
+    <div class="p-5">
+      <div class="text-xl font-extrabold text-gray-900 mb-1">Registrar pago a ${prov.nombre}</div>
+      <div class="text-gray-500 text-sm mb-4">Le debés ${money(prov.cuentaCorriente||0)}</div>
+      <input id="pp-monto" type="number" inputmode="decimal" placeholder="Monto pagado" value="${prov.cuentaCorriente||0}" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg mb-4" />
+      <button onclick="confirmarPagoProveedor('${proveedorId}')" class="tap w-full bg-indigo-700 text-white font-bold py-4 rounded-2xl text-lg">Guardar pago</button>
+    </div>
+  `);
+}
+function confirmarPagoProveedor(proveedorId){
+  const prov = state.proveedores.find(x=>x.id===proveedorId);
+  const monto = parseFloat(document.getElementById('pp-monto').value) || 0;
+  if(monto <= 0){ toast('Poné un monto válido', {icon:'✍️'}); return; }
+  prov.cuentaCorriente = Math.max(0, (prov.cuentaCorriente||0) - monto);
+  state.proveedorMovimientos.push({ id: uid(), proveedorId, tipo:'pago', monto, fecha: Date.now(), detalle:'Pago registrado' });
+  guardar();
+  cerrarModal();
+  renderApp();
+  toast('Pago registrado', {icon:'✅'});
+}
+function verHistorialProveedor(proveedorId){
+  const prov = state.proveedores.find(x=>x.id===proveedorId);
+  const recepciones = state.recepciones.filter(r=>r.proveedorId===proveedorId).sort((a,b)=>b.fecha-a.fecha);
+  abrirModal(`
+    <div class="p-5">
+      <div class="text-xl font-extrabold text-gray-900 mb-4">Historial con ${prov.nombre}</div>
+      ${recepciones.length ? recepciones.map(r => `
+        <div class="card p-3 mb-2">
+          <div class="flex items-center justify-between">
+            <span class="text-gray-700 font-semibold">${fechaHora(r.fecha)}</span>
+            <span class="font-bold text-gray-900">${money(r.total)}</span>
+          </div>
+          <div class="text-gray-400 text-sm">${r.items.length} producto${r.items.length===1?'':'s'} · ${r.formaPago==='efectivo'?'Efectivo':r.formaPago==='cheque'?'Cheque':'Cuenta corriente'}</div>
+        </div>
+      `).join('') : `<div class="text-center text-gray-400 py-6">Sin recepciones registradas</div>`}
+      <button onclick="cerrarModal()" class="tap w-full bg-gray-100 text-gray-700 font-bold py-3 rounded-2xl mt-2">Cerrar</button>
+    </div>
+  `);
 }
 
 /* ====================== MÁS (menú) ====================== */
