@@ -18,7 +18,7 @@
   import { initializeApp } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-app.js";
   import {
     getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword,
-    GoogleAuthProvider, signInWithRedirect, getRedirectResult, signOut, sendPasswordResetEmail,
+    GoogleAuthProvider, signInWithRedirect, getRedirectResult, signInWithPopup, signOut, sendPasswordResetEmail,
     EmailAuthProvider, linkWithCredential
   } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-auth.js";
   import {
@@ -42,10 +42,22 @@
   window.fbOnCambioAuth = (callback) => onAuthStateChanged(fbAuth, callback);
   window.fbRegistrarse = (email, password) => createUserWithEmailAndPassword(fbAuth, email, password);
   window.fbIniciarSesion = (email, password) => signInWithEmailAndPassword(fbAuth, email, password);
-  // signInWithRedirect en vez de signInWithPopup: las ventanas emergentes fallan
-  // seguido en navegadores de celular (Safari, in-app browsers, etc). Con
-  // redirect te manda a la pantalla de Google y te trae de vuelta, sin popup.
-  window.fbIniciarSesionGoogle = () => signInWithRedirect(fbAuth, new GoogleAuthProvider());
+  // Primero probamos con ventana emergente (popup): no sale de la página, así
+  // que evita el "ir y volver" por la página intermedia de Firebase que en
+  // varios navegadores queda en blanco por los bloqueos de cookies de
+  // terceros. Solo si el navegador bloquea el popup (típico en algunos
+  // celulares) caemos a signInWithRedirect como respaldo.
+  window.fbIniciarSesionGoogle = async () => {
+    const provider = new GoogleAuthProvider();
+    try{
+      await signInWithPopup(fbAuth, provider);
+    }catch(err){
+      if(err.code === 'auth/popup-blocked' || err.code === 'auth/operation-not-supported-in-this-environment'){
+        return signInWithRedirect(fbAuth, provider);
+      }
+      throw err;
+    }
+  };
   window.fbResetPassword = (email) => sendPasswordResetEmail(fbAuth, email);
   window.fbCerrarSesion = () => signOut(fbAuth);
   window.fbGuardarNegocio = (uid, datos) => setDoc(doc(fbDb, 'negocios', uid), datos);
