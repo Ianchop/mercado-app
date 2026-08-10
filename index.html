@@ -2399,11 +2399,67 @@ function escanearParaVender(){
       agregarAlCarrito(producto.id, 1);
       toast(`Agregado: ${producto.nombre}`, { icon:'📷' });
     } else {
-      toast(`Código ${codigo} no encontrado`, { icon:'🤔', duracion:5000, acciones:[
-        { fn:`mostrarFormProducto(null, {codigoBarras:'${codigo}'})`, texto:'+ Cargar producto' }
-      ]});
+      mostrarVincularCodigoBarras(codigo, (p) => {
+        agregarAlCarrito(p.id, 1);
+        toast(`Agregado: ${p.nombre}`, { icon:'📷' });
+      });
     }
   });
+}
+
+/* ====================== VINCULAR CÓDIGO DE BARRAS ======================
+   No hay forma de conseguir de antemano el código de barras real de fábrica
+   de cada producto (no existe una base pública/gratuita con todos). Esto
+   resuelve lo mismo de la forma en que lo hacen los sistemas de POS reales:
+   la primera vez que se escanea un producto real y el código no está
+   cargado, se deja elegir a QUÉ producto del catálogo corresponde (en vez
+   de crear uno duplicado) — así el código real queda guardado para
+   siempre, aprendido escaneo a escaneo en vez de inventado. */
+let _codigoAVincular = '';
+let _callbackVincular = null;
+function mostrarVincularCodigoBarras(codigo, callback){
+  _codigoAVincular = codigo;
+  _callbackVincular = callback;
+  abrirModal(`
+    <div class="p-5">
+      <div class="text-xl font-extrabold text-gray-900 mb-1">Código no reconocido</div>
+      <div class="text-gray-500 text-sm mb-4">Código: <b>${codigo}</b>. Si ya tenés este producto cargado, buscalo para guardarle el código. Si es nuevo, cargalo desde cero.</div>
+      <input id="vincular-busqueda" type="text" placeholder="Buscar producto..." oninput="filtrarVincularCodigoBarras()" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg mb-3 focus:border-indigo-600 focus:outline-none" />
+      <div id="vincular-resultados" class="flex flex-col gap-2 mb-3" style="max-height:35vh; overflow-y:auto;"></div>
+      <button onclick="cerrarModal(); mostrarFormProducto(null, {codigoBarras:'${codigo}'});" class="tap w-full bg-white border-2 border-gray-200 text-gray-700 font-bold py-3.5 rounded-2xl mb-2">+ Es un producto nuevo</button>
+      <button onclick="cerrarModal()" class="tap w-full text-gray-400 font-semibold py-2">Cancelar</button>
+    </div>
+  `);
+  document.getElementById('vincular-busqueda').focus();
+}
+function filtrarVincularCodigoBarras(){
+  const texto = (document.getElementById('vincular-busqueda').value || '').trim().toLowerCase();
+  const resultados = !texto ? [] : state.productos.filter(p =>
+    p.nombre.toLowerCase().includes(texto) || (p.marca||'').toLowerCase().includes(texto)
+  ).slice(0, 20);
+  document.getElementById('vincular-resultados').innerHTML = resultados.length
+    ? resultados.map(p => `
+        <button onclick="vincularCodigoBarras('${p.id}')" class="tap card p-3 flex items-center gap-3 text-left">
+          <span class="text-2xl">${p.emoji}</span>
+          <span class="min-w-0">
+            <span class="font-bold text-gray-800 block truncate">${p.nombre}</span>
+            ${p.codigoBarras ? `<span class="text-amber-600 text-xs">Ya tiene otro código cargado — se lo reemplaza por este</span>` : ''}
+          </span>
+        </button>
+      `).join('')
+    : (texto ? `<div class="text-gray-400 text-sm text-center py-3">Sin resultados</div>` : '');
+  refrescarIconos();
+}
+function vincularCodigoBarras(productoId){
+  const p = state.productos.find(x=>x.id===productoId);
+  if(!p) return;
+  p.codigoBarras = _codigoAVincular;
+  guardar();
+  cerrarModal();
+  toast(`Código guardado en ${p.nombre}`, { icon:'✅' });
+  const cb = _callbackVincular;
+  _callbackVincular = null;
+  if(cb) cb(p);
 }
 
 function abrirModalCobrar(){
@@ -3656,8 +3712,11 @@ function escanearParaRecepcion(){
       agregarRecepcionCarrito(p.id);
       toast(`${p.nombre} agregado`, {icon:'📷'});
     } else {
-      toast('No encontramos ningún producto con ese código. Creá el producto primero.', {icon:'❓', duracion:4000});
-      mostrarFormProducto(null, { codigoBarras: codigo, proveedorId: recepcionProveedorId });
+      mostrarVincularCodigoBarras(codigo, (pElegido) => {
+        if(!pElegido.proveedorId){ pElegido.proveedorId = recepcionProveedorId; guardar(); }
+        agregarRecepcionCarrito(pElegido.id);
+        toast(`${pElegido.nombre} agregado`, {icon:'📷'});
+      });
     }
   });
 }
