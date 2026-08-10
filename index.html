@@ -18,7 +18,7 @@
   import { initializeApp } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-app.js";
   import {
     getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword,
-    GoogleAuthProvider, signInWithPopup, signOut, sendPasswordResetEmail
+    GoogleAuthProvider, signInWithRedirect, getRedirectResult, signOut, sendPasswordResetEmail
   } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-auth.js";
   import {
     getFirestore, doc, getDoc, setDoc, enableIndexedDbPersistence
@@ -41,7 +41,10 @@
   window.fbOnCambioAuth = (callback) => onAuthStateChanged(fbAuth, callback);
   window.fbRegistrarse = (email, password) => createUserWithEmailAndPassword(fbAuth, email, password);
   window.fbIniciarSesion = (email, password) => signInWithEmailAndPassword(fbAuth, email, password);
-  window.fbIniciarSesionGoogle = () => signInWithPopup(fbAuth, new GoogleAuthProvider());
+  // signInWithRedirect en vez de signInWithPopup: las ventanas emergentes fallan
+  // seguido en navegadores de celular (Safari, in-app browsers, etc). Con
+  // redirect te manda a la pantalla de Google y te trae de vuelta, sin popup.
+  window.fbIniciarSesionGoogle = () => signInWithRedirect(fbAuth, new GoogleAuthProvider());
   window.fbResetPassword = (email) => sendPasswordResetEmail(fbAuth, email);
   window.fbCerrarSesion = () => signOut(fbAuth);
   window.fbGuardarNegocio = (uid, datos) => setDoc(doc(fbDb, 'negocios', uid), datos);
@@ -49,6 +52,13 @@
     const snap = await getDoc(doc(fbDb, 'negocios', uid));
     return snap.exists() ? snap.data() : null;
   };
+
+  // Al volver de la pantalla de Google, Firebase resuelve esto solo; acá
+  // solo capturamos el error si algo salió mal (ej: dominio no autorizado)
+  // para poder avisarle al usuario en vez de fallar en silencio.
+  getRedirectResult(fbAuth).catch((err) => {
+    window.__errorRedirectGoogle = err;
+  });
 </script>
 <style>
   html { -webkit-text-size-adjust: 100%; }
@@ -432,6 +442,10 @@ window.addEventListener('DOMContentLoaded', () => {
     aplicarTamanoLetra();
     if(!location.hash || location.hash === '#/' || location.hash === '#'){ location.hash = '#/inicio'; }
     renderApp();
+    if(!user && window.__errorRedirectGoogle){
+      toast(traducirErrorFirebase(window.__errorRedirectGoogle), { icon:'⚠️', duracion:5000 });
+      window.__errorRedirectGoogle = null;
+    }
   });
 });
 
