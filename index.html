@@ -10,6 +10,7 @@
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script src="https://unpkg.com/@zxing/library@latest"></script>
+<script src="https://unpkg.com/lucide@latest"></script>
 <script type="module">
   // Firebase: cuentas reales (email/contraseña + Google) y datos en la nube.
   // Se importa como módulo ES directo desde el CDN de Google: cero instalación,
@@ -455,6 +456,18 @@ function crearProductosSeed(tipo){
   }));
 }
 
+/* ====================== ÍCONOS ====================== */
+// Íconos de línea (Lucide) en vez de emojis, para las pantallas de mayor
+// impacto (login, panel admin, suscripción, navegación, dashboard). Se
+// insertan como placeholder <i data-lucide="..."> y lucide.createIcons()
+// los convierte en SVG real después de cada render.
+function icono(nombre, clase){
+  return `<i data-lucide="${nombre}" class="${clase || ''}"></i>`;
+}
+function refrescarIconos(){
+  if(window.lucide) lucide.createIcons();
+}
+
 /* ====================== TOASTS ====================== */
 function toast(msg, opts = {}){
   const wrap = document.getElementById('toast-wrap');
@@ -470,6 +483,7 @@ function toast(msg, opts = {}){
 function abrirModal(html){
   document.getElementById('modal-box').innerHTML = html;
   document.getElementById('modal-wrap').style.display = 'block';
+  refrescarIconos();
 }
 function cerrarModal(){
   detenerEscaneo();
@@ -657,38 +671,39 @@ function ir(hash){ location.hash = hash; }
 
 function renderApp(){
   const app = document.getElementById('app');
+  const mostrar = (html) => { app.innerHTML = html; refrescarIconos(); };
   if(!sesionLista){
-    app.innerHTML = vistaCargando();
+    mostrar(vistaCargando());
     return;
   }
   if(vinculandoGoogleEmail){
-    app.innerHTML = vistaVincularGoogle();
+    mostrar(vistaVincularGoogle());
     return;
   }
   if(!usuarioFirebase){
-    app.innerHTML = vistaLogin();
+    mostrar(vistaLogin());
     return;
   }
   if(pantallaCrearPassword){
-    app.innerHTML = vistaCrearPassword();
+    mostrar(vistaCrearPassword());
     return;
   }
   if(errorCargaDatos){
-    app.innerHTML = vistaErrorCarga();
+    mostrar(vistaErrorCarga());
     return;
   }
   if(esAdminActual() && !modoDemoAdmin){
-    app.innerHTML = vistaAdmin();
+    mostrar(vistaAdmin());
     return;
   }
   if(!state.negocio){
-    app.innerHTML = vistaOnboarding();
+    mostrar(vistaOnboarding());
     return;
   }
   // El admin no paga: puede entrar a la app con su propio negocio de prueba
   // para mostrarle las funciones a un dueño de local antes de venderle la suscripción.
   if(!esAdminActual() && !suscripcionValida(suscripcionActual)){
-    app.innerHTML = vistaPago();
+    mostrar(vistaPago());
     return;
   }
   const ruta = (location.hash || '#/inicio').replace('#/','');
@@ -709,32 +724,39 @@ function renderApp(){
     case 'config': contenido = vistaConfig(); break;
     default: contenido = vistaInicio();
   }
-  app.innerHTML = `
+  mostrar(`
     ${esAdminActual() && modoDemoAdmin ? `
     <div class="bg-amber-500 text-white text-center text-sm font-bold py-2 px-4 flex items-center justify-center gap-3">
-      <span>👑 Modo demo (cuenta admin)</span>
+      <span class="flex items-center gap-1.5">${icono('crown','w-4 h-4')} Modo demo (cuenta admin)</span>
       <button onclick="salirDemoAdmin()" class="underline">Volver al panel admin</button>
     </div>` : ''}
     ${cabecera()}
     <div class="px-4">${contenido}</div>
     ${navInferior(pantalla)}
-  `;
+  `);
   if(pantalla === 'inicio') dibujarGraficoSemana();
   if(pantalla === 'reportes') dibujarGraficoReportes();
 }
 
 /* ====================== SESIÓN (Firebase Auth) ====================== */
+// Insignia de marca reutilizable (reemplaza al emoji de local 🏪) para que
+// las pantallas de entrada se vean como el logo de una app real.
+function logoApp(nombreIcono, fondo, color, extraClase){
+  return `<div class="w-20 h-20 rounded-3xl flex items-center justify-center mb-5 shadow-sm ${extraClase||''}" style="background:${fondo || '#4338ca'}; color:${color || '#fff'};">
+    ${icono(nombreIcono || 'store', 'w-9 h-9')}
+  </div>`;
+}
 function vistaCargando(){
   return `
   <div class="min-h-screen flex flex-col items-center justify-center px-6 text-center">
-    <div class="text-6xl mb-4">🏪</div>
+    ${logoApp('store', '#4338ca', '#fff', 'animate-pulse')}
     <div class="text-gray-400 font-semibold">Cargando...</div>
   </div>`;
 }
 function vistaErrorCarga(){
   return `
   <div class="min-h-screen flex flex-col items-center justify-center px-6 text-center">
-    <div class="text-6xl mb-4">📡</div>
+    ${logoApp('wifi-off', '#fef2f2', '#dc2626')}
     <h1 class="text-2xl font-extrabold text-gray-900 mb-2">No pudimos cargar tus datos</h1>
     <p class="text-gray-500 mb-4 text-lg">Revisá tu conexión a internet e intentá de nuevo. Tus datos están a salvo en la nube, no se perdió nada.</p>
     ${window.__ultimoErrorGlobal ? `<div class="card w-full p-3 mb-4 text-left text-sm text-gray-400">${window.__ultimoErrorGlobal}</div>` : ''}
@@ -746,7 +768,7 @@ let modoLogin = 'iniciar'; // 'iniciar' | 'registrar'
 function vistaLogin(){
   return `
   <div class="min-h-screen flex flex-col items-center justify-center px-6 text-center">
-    <div class="text-6xl mb-4">🏪</div>
+    ${logoApp()}
     <h1 class="text-3xl font-extrabold text-gray-900 mb-2">${modoLogin==='iniciar' ? '¡Bienvenido de nuevo!' : 'Creá tu cuenta'}</h1>
     <p class="text-gray-500 mb-8 text-lg">${modoLogin==='iniciar' ? 'Entrá con el mail de tu negocio' : 'Vas a poder entrar desde cualquier dispositivo'}</p>
     <div class="card w-full p-6">
@@ -808,20 +830,21 @@ function campoPasswordConOjo(id, placeholder){
   return `
   <div class="relative mb-3">
     <input id="${id}" type="password" placeholder="${placeholder || '••••••••'}" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 pr-12 text-lg focus:border-indigo-600 focus:outline-none" />
-    <button type="button" onclick="alternarVerPassword('${id}', this)" class="absolute right-3 top-1/2 -translate-y-1/2 text-xl">👁️</button>
+    <button type="button" onclick="alternarVerPassword('${id}', this)" class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400">${icono('eye','w-5 h-5')}</button>
   </div>`;
 }
 function alternarVerPassword(id, boton){
   const input = document.getElementById(id);
   const mostrando = input.type === 'text';
   input.type = mostrando ? 'password' : 'text';
-  boton.textContent = mostrando ? '👁️' : '🙈';
+  boton.innerHTML = icono(mostrando ? 'eye' : 'eye-off', 'w-5 h-5');
+  refrescarIconos();
 }
 
 function vistaCrearPassword(){
   return `
   <div class="min-h-screen flex flex-col items-center justify-center px-6 text-center">
-    <div class="text-6xl mb-4">🔒</div>
+    ${logoApp('lock', '#eef0ff', '#4338ca')}
     <h1 class="text-2xl font-extrabold text-gray-900 mb-2">Creá una contraseña</h1>
     <p class="text-gray-500 mb-8 text-lg">Entraste con Google. Para que también puedas entrar sin depender de Google, creá una contraseña para <b>${usuarioFirebase ? usuarioFirebase.email : ''}</b>.</p>
     <div class="card w-full p-6 text-left">
@@ -847,7 +870,7 @@ function confirmarCrearPassword(){
 function vistaVincularGoogle(){
   return `
   <div class="min-h-screen flex flex-col items-center justify-center px-6 text-center">
-    <div class="text-6xl mb-4">🔗</div>
+    ${logoApp('link', '#eef0ff', '#4338ca')}
     <h1 class="text-2xl font-extrabold text-gray-900 mb-2">Vinculá tu cuenta de Google</h1>
     <p class="text-gray-500 mb-8 text-lg">Ya existe una cuenta con contraseña para <b>${vinculandoGoogleEmail}</b>. Ingresá esa contraseña una sola vez para poder entrar con Google de ahora en más.</p>
     <div class="card w-full p-6 text-left">
@@ -879,7 +902,7 @@ function vistaOnboarding(){
   if(onboardingPaso === 1){
     return `
     <div class="min-h-screen flex flex-col items-center justify-center px-6 text-center">
-      <div class="text-6xl mb-4">🏪</div>
+      ${logoApp()}
       <h1 class="text-3xl font-extrabold text-gray-900 mb-2">¡Ya casi!</h1>
       <p class="text-gray-500 mb-8 text-lg">Vamos a armar tu negocio, muy fácil.</p>
       <div class="card w-full p-6">
@@ -895,21 +918,21 @@ function vistaOnboarding(){
   }
   return `
     <div class="min-h-screen flex flex-col items-center justify-center px-6 text-center">
-      <div class="text-5xl mb-3">👋</div>
+      ${logoApp('party-popper', '#eef0ff', '#4338ca')}
       <h1 class="text-2xl font-extrabold text-gray-900 mb-1">Hola, ${onboardingNombre}</h1>
       <p class="text-gray-500 mb-6 text-lg">¿Qué tipo de negocio tenés? (esto no se puede cambiar después)</p>
       <div class="grid cards-grid gap-4 w-full">
-        ${botonTipo('mercado','🛒','Mercado / Despensa')}
-        ${botonTipo('ropa','👕','Tienda de ropa')}
-        ${botonTipo('bazar','🎁','Bazar / Regalería')}
-        ${botonTipo('otro','🏪','Otro rubro')}
+        ${botonTipo('mercado','shopping-cart','Mercado / Despensa')}
+        ${botonTipo('ropa','shirt','Tienda de ropa')}
+        ${botonTipo('bazar','gift','Bazar / Regalería')}
+        ${botonTipo('otro','store','Otro rubro')}
       </div>
       <button onclick="onboardingPaso=1; renderApp();" class="mt-6 text-gray-400 font-semibold">← Volver</button>
     </div>`;
 }
-function botonTipo(tipo, emoji, label){
+function botonTipo(tipo, nombreIcono, label){
   return `<button onclick="finalizarOnboarding('${tipo}')" class="tap card p-5 flex flex-col items-center gap-2 border-2 border-transparent hover:border-indigo-500">
-    <span class="text-4xl">${emoji}</span>
+    <span class="text-indigo-600">${icono(nombreIcono, 'w-8 h-8')}</span>
     <span class="font-bold text-gray-800">${label}</span>
   </button>`;
 }
@@ -941,7 +964,7 @@ function vistaPago(){
   const link = configPagos.linkMercadoPago || '';
   return `
   <div class="min-h-screen flex flex-col items-center justify-center px-6 text-center">
-    <div class="text-6xl mb-4">💳</div>
+    ${logoApp('credit-card', yaVencio ? '#fef2f2' : '#eef0ff', yaVencio ? '#dc2626' : '#4338ca')}
     <h1 class="text-2xl font-extrabold text-gray-900 mb-2">${yaVencio ? 'Tu suscripción venció' : 'Activá tu cuenta'}</h1>
     <p class="text-gray-500 mb-8 text-lg">
       ${yaVencio
@@ -949,7 +972,7 @@ function vistaPago(){
         : 'Para empezar a usar tu negocio, activá tu suscripción de $5.000 por mes.'}
     </p>
     ${link
-      ? `<a href="${link}" target="_blank" rel="noopener" class="tap w-full bg-indigo-700 text-white font-bold text-xl py-4 rounded-2xl shadow-lg mb-4 block">💳 Pagar suscripción — $5.000/mes</a>`
+      ? `<a href="${link}" target="_blank" rel="noopener" class="tap w-full bg-indigo-700 text-white font-bold text-xl py-4 rounded-2xl shadow-lg mb-4 flex items-center justify-center gap-2">${icono('credit-card','w-5 h-5')} Pagar suscripción — $5.000/mes</a>`
       : `<div class="card w-full p-4 mb-4 text-gray-400">El administrador todavía no cargó el link de pago. Volvé a intentarlo más tarde.</div>`}
     <div class="card w-full p-5 text-left mb-4">
       <div class="font-bold text-gray-700 mb-1">¿Ya pagaste?</div>
@@ -964,19 +987,22 @@ function vistaAdmin(){
   const activos = listaSuscripciones.filter(s => suscripcionValida(s)).length;
   return `
   <div class="px-4 pt-5 pb-3 flex items-center justify-between">
-    <div>
-      <div class="text-xl font-extrabold text-gray-900">👑 Panel de administrador</div>
-      <div class="text-gray-400 text-sm">${usuarioFirebase.email}</div>
+    <div class="flex items-center gap-2">
+      <span class="text-amber-500">${icono('crown','w-5 h-5')}</span>
+      <div>
+        <div class="text-xl font-extrabold text-gray-900">Panel de administrador</div>
+        <div class="text-gray-400 text-sm">${usuarioFirebase.email}</div>
+      </div>
     </div>
-    <button onclick="cerrarSesionApp()" class="tap w-11 h-11 rounded-full bg-white card flex items-center justify-center text-xl">🚪</button>
+    <button onclick="cerrarSesionApp()" class="tap w-11 h-11 rounded-full bg-white card flex items-center justify-center text-gray-500">${icono('log-out','w-5 h-5')}</button>
   </div>
   <div class="px-4 pb-24">
     <div class="card p-4 mb-4">
       <div class="text-gray-500 text-sm mb-1">Negocios con suscripción activa</div>
       <div class="text-3xl font-extrabold text-gray-900">${activos} / ${listaSuscripciones.length}</div>
     </div>
-    <button onclick="mostrarConfigPagoLink()" class="tap w-full bg-white border-2 border-gray-200 text-gray-700 font-bold py-3.5 rounded-2xl mb-3">🔗 Configurar link de pago (Mercado Pago)</button>
-    <button onclick="entrarDemoAdmin()" class="tap w-full bg-indigo-700 text-white font-bold py-3.5 rounded-2xl mb-4">🖥️ Entrar a la app (mostrarle a un cliente)</button>
+    <button onclick="mostrarConfigPagoLink()" class="tap w-full bg-white border-2 border-gray-200 text-gray-700 font-bold py-3.5 rounded-2xl mb-3 flex items-center justify-center gap-2">${icono('link','w-5 h-5')} Configurar link de pago (Mercado Pago)</button>
+    <button onclick="entrarDemoAdmin()" class="tap w-full bg-indigo-700 text-white font-bold py-3.5 rounded-2xl mb-4 flex items-center justify-center gap-2">${icono('monitor','w-5 h-5')} Entrar a la app (mostrarle a un cliente)</button>
     <div class="section-label mb-2">Negocios (${listaSuscripciones.length})</div>
     ${listaSuscripciones.length ? listaSuscripciones.slice().sort((a,b) => (a.nombreNegocio||'').localeCompare(b.nombreNegocio||'')).map(s => {
       const info = estadoSuscripcionInfo(s);
@@ -985,7 +1011,7 @@ function vistaAdmin(){
         <div class="font-bold text-gray-800">${s.nombreNegocio || '(sin nombre)'}</div>
         <div class="text-gray-400 text-sm mb-2">${s.email || ''} · ${nombreRubro(s.tipo)}</div>
         <div class="badge-venc inline-block mb-3" style="background:${info.bg};color:${info.color};">${info.texto}</div>
-        <button onclick="marcarNegocioPagado('${s.id}')" class="tap w-full bg-green-600 text-white font-bold py-2.5 rounded-xl text-sm">✅ Marcar como pagado (hasta ${formatearFechaCorta(calcularProximoVencimiento())})</button>
+        <button onclick="marcarNegocioPagado('${s.id}')" class="tap w-full bg-green-600 text-white font-bold py-2.5 rounded-xl text-sm flex items-center justify-center gap-1.5">${icono('check-circle','w-4 h-4')} Marcar como pagado (hasta ${formatearFechaCorta(calcularProximoVencimiento())})</button>
       </div>`;
     }).join('') : `<div class="text-center text-gray-400 py-16">Todavía no hay negocios registrados</div>`}
   </div>`;
@@ -1038,27 +1064,27 @@ function cabecera(){
       <div class="min-w-0">
         <div class="text-xl font-extrabold text-gray-900 leading-tight truncate">${state.negocio.nombre}</div>
         <div class="text-gray-400 text-sm capitalize">${fechaLarga()}</div>
-        ${state.usuarios.length ? `<button onclick="mostrarSelectorUsuario()" class="tap text-indigo-700 text-sm font-bold mt-0.5">👤 ${usuarioActualNombre()} ▾</button>` : ''}
+        ${state.usuarios.length ? `<button onclick="mostrarSelectorUsuario()" class="tap text-indigo-700 text-sm font-bold mt-0.5 flex items-center gap-1">${icono('user','w-3.5 h-3.5')} ${usuarioActualNombre()} ${icono('chevron-down','w-3.5 h-3.5')}</button>` : ''}
       </div>
     </div>
-    <button onclick="ir('#/config')" class="tap w-11 h-11 rounded-full bg-white card flex items-center justify-center text-xl flex-shrink-0">⚙️</button>
+    <button onclick="ir('#/config')" class="tap w-11 h-11 rounded-full bg-white card flex items-center justify-center flex-shrink-0 text-gray-600">${icono('settings','w-5 h-5')}</button>
   </div>`;
 }
 
 function navInferior(activo){
   const items = [
-    ['inicio','🏠','Inicio'],
-    ['caja','🛒','Vender'],
-    ['fiado','📒','Fiado'],
-    ['stock','📦','Stock'],
-    ['mas','☰','Más'],
+    ['inicio','home','Inicio'],
+    ['caja','shopping-cart','Vender'],
+    ['fiado','book-open','Fiado'],
+    ['stock','package','Stock'],
+    ['mas','menu','Más'],
   ];
   return `
   <div id="nav-principal" class="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-40">
     <div class="max-w-lg mx-auto grid grid-cols-5 px-1 py-1">
-      ${items.map(([ruta,emoji,label]) => `
+      ${items.map(([ruta,nombreIcono,label]) => `
         <button onclick="ir('#/${ruta}')" class="tap nav-boton flex flex-col items-center py-2 gap-0.5 ${activo===ruta?'text-indigo-700':'text-gray-400'}">
-          <span class="nav-icono w-9 h-9 flex items-center justify-center rounded-xl text-xl ${activo===ruta?'bg-indigo-50':''}">${emoji}</span>
+          <span class="nav-icono w-9 h-9 flex items-center justify-center rounded-xl ${activo===ruta?'bg-indigo-50':''}">${icono(nombreIcono,'w-5 h-5')}</span>
           <span class="nav-etiqueta text-[11px] font-bold">${label}</span>
         </button>
       `).join('')}
@@ -1084,10 +1110,10 @@ function vistaInicio(){
 
   return `
   <div class="grid cards-grid gap-3 mt-2">
-    ${tarjetaStat('💰','Vendiste hoy', money(totalHoy), '#ecfdf5', '#059669', "ir('#/reportes')")}
-    ${tarjetaStat('📈','Ganancia de hoy', money(gananciaHoy), '#eef0ff', '#4338ca', "ir('#/reportes')")}
-    ${tarjetaStat('📒','Te deben (fiado)', money(totalFiado), '#fffbeb', '#b45309', "ir('#/fiado')")}
-    ${tarjetaStat('📦','Para reponer', bajoStock.length + ' producto' + (bajoStock.length===1?'':'s'), bajoStock.length>0 ? '#fef2f2' : '#f4f5f7', bajoStock.length>0 ? '#dc2626' : '#9ca3af', "ir('#/stock')")}
+    ${tarjetaStat('dollar-sign','Vendiste hoy', money(totalHoy), '#ecfdf5', '#059669', "ir('#/reportes')")}
+    ${tarjetaStat('trending-up','Ganancia de hoy', money(gananciaHoy), '#eef0ff', '#4338ca', "ir('#/reportes')")}
+    ${tarjetaStat('book-open','Te deben (fiado)', money(totalFiado), '#fffbeb', '#b45309', "ir('#/fiado')")}
+    ${tarjetaStat('package','Para reponer', bajoStock.length + ' producto' + (bajoStock.length===1?'':'s'), bajoStock.length>0 ? '#fef2f2' : '#f4f5f7', bajoStock.length>0 ? '#dc2626' : '#9ca3af', "ir('#/stock')")}
   </div>
 
   ${bajoStock.length ? `
@@ -1176,10 +1202,10 @@ function compartirResumenDia(){
     + (bajoStock ? `\n⚠️ ${bajoStock} producto(s) por reponer` : '');
   window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank');
 }
-function tarjetaStat(emoji, label, valor, colorFondo, colorTexto, onclick){
+function tarjetaStat(nombreIcono, label, valor, colorFondo, colorTexto, onclick){
   return `
   <button onclick="${onclick}" class="tap card p-4 text-left flex flex-col gap-2">
-    <div class="icon-badge" style="background:${colorFondo}; color:${colorTexto};">${emoji}</div>
+    <div class="icon-badge" style="background:${colorFondo}; color:${colorTexto};">${icono(nombreIcono,'w-5 h-5')}</div>
     <div>
       <div class="section-label">${label}</div>
       <div class="text-2xl font-extrabold text-gray-900 mt-0.5">${valor}</div>
@@ -2631,8 +2657,8 @@ function vistaReportes(){
     <button onclick="filtroPeriodoReportes='todo'; renderApp();" class="tap flex-1 py-2.5 rounded-xl font-bold ${filtroPeriodoReportes==='todo'?'bg-indigo-700 text-white':'bg-white text-gray-500'}">Todo el historial</button>
   </div>
   <div class="grid grid-cols-2 gap-3 mb-4">
-    ${tarjetaStat('💰', filtroPeriodoReportes==='mes' ? 'Vendido este mes' : 'Total vendido', money(totalPeriodo), '#ecfdf5', '#059669', "")}
-    ${tarjetaStat('📈', filtroPeriodoReportes==='mes' ? 'Ganancia este mes' : 'Ganancia total', money(gananciaPeriodo), '#eef0ff', '#4338ca', "")}
+    ${tarjetaStat('dollar-sign', filtroPeriodoReportes==='mes' ? 'Vendido este mes' : 'Total vendido', money(totalPeriodo), '#ecfdf5', '#059669', "")}
+    ${tarjetaStat('trending-up', filtroPeriodoReportes==='mes' ? 'Ganancia este mes' : 'Ganancia total', money(gananciaPeriodo), '#eef0ff', '#4338ca', "")}
   </div>
 
   ${filtroPeriodoReportes==='mes' && (totalMesAnterior>0 || totalPeriodo>0) ? `
