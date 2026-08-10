@@ -191,6 +191,17 @@
 <div id="app" class="max-w-lg mx-auto min-h-screen"></div>
 
 <script>
+// Guarda el último error global (aunque venga de un script de otro origen,
+// como el de Firebase, con lo que el navegador nos deje ver) para poder
+// mostrar una pista real si la sesión se cuelga, en vez de solo "algo falló".
+window.__ultimoErrorGlobal = '';
+window.addEventListener('error', (e) => {
+  window.__ultimoErrorGlobal = (e.message || 'Error desconocido') + (e.filename ? ' @ ' + e.filename.split('/').pop() + ':' + e.lineno : '');
+});
+window.addEventListener('unhandledrejection', (e) => {
+  window.__ultimoErrorGlobal = 'Promesa rechazada: ' + ((e.reason && (e.reason.code || e.reason.message)) || String(e.reason));
+});
+
 /* ====================== CUENTAS (Firebase Auth) ====================== */
 // Cada negocio = una cuenta real de Firebase (mail o Google), con sus datos
 // guardados en la nube (Firestore), separados del resto por su propio uid.
@@ -514,7 +525,20 @@ window.addEventListener('hashchange', renderApp);
 window.addEventListener('DOMContentLoaded', () => {
   aplicarTamanoLetra();
   renderApp(); // pantalla de carga mientras Firebase confirma la sesión
+  // Red de seguridad: si por lo que sea Firebase nunca llega a avisarnos si
+  // hay sesión o no (bloqueo del navegador, error interno, lo que sea), no
+  // nos quedamos en "Cargando..." para siempre. A los 8s forzamos a mostrar
+  // igual la pantalla de inicio de sesión.
+  const relojSeguridadSesion = setTimeout(() => {
+    if(!sesionLista){
+      sesionLista = true;
+      renderApp();
+      const pista = window.__ultimoErrorGlobal ? ` (${window.__ultimoErrorGlobal})` : '';
+      toast('Tardó más de lo normal en confirmar la sesión. Si "Continuar con Google" no funciona, probá con mail y contraseña.' + pista, { icon:'⚠️', duracion:9000 });
+    }
+  }, 8000);
   window.fbOnCambioAuth(async (user) => {
+    clearTimeout(relojSeguridadSesion);
     usuarioFirebase = user;
     suscripcionActual = null;
     listaSuscripciones = [];
