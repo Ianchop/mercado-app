@@ -2517,6 +2517,30 @@ function normalizarTexto(s){
 let _codigoAVincular = '';
 let _callbackVincular = null;
 let _infoProductoEscaneado = null;
+// Padrón SEPA / Precios Claros (datos.produccion.gob.ar): base OFICIAL del
+// gobierno argentino, actualizada a diario por los comercios por ley. Trae
+// ~78.000 códigos de barra reales (EAN/UPC, no inventados) de TODOS los
+// rubros (no solo comida), con nombre y marca tal cual se vende en
+// Argentina. Se sirve como archivo estático junto a la app (sepa-ean.json)
+// en vez de por API: es un padrón que se actualiza una vez por publicación
+// de la app, no en cada venta, así que no hace falta bajarlo de nuevo cada
+// vez ni pagar por consultas. Formato compacto: {ean: [nombre, marca]}.
+let _tablaSepaEan = null;
+let _cargandoTablaSepa = null;
+function cargarTablaSepaEan(){
+  if(_tablaSepaEan) return Promise.resolve(_tablaSepaEan);
+  if(_cargandoTablaSepa) return _cargandoTablaSepa;
+  _cargandoTablaSepa = fetch('sepa-ean.json')
+    .then(r => r.ok ? r.json() : {})
+    .then(datos => { _tablaSepaEan = datos; return datos; })
+    .catch(() => ({}));
+  return _cargandoTablaSepa;
+}
+// El padrón SEPA viene todo en mayúsculas ("SHAMPOO HEAD SHOULDERS 650ML"):
+// se capitaliza para que se lea como el resto de la app.
+function capitalizarBonito(s){
+  return (s || '').toLowerCase().replace(/(^|\s)([a-zñáéíóúü])/g, (m, sep, c) => sep + c.toUpperCase());
+}
 async function buscarEnBaseDeProductos(dominio, codigo){
   try{
     const resp = await fetch(`https://${dominio}/api/v2/product/${encodeURIComponent(codigo)}.json?fields=product_name,brands,image_front_small_url`);
@@ -2533,11 +2557,16 @@ async function buscarEnBaseDeProductos(dominio, codigo){
   }
 }
 async function buscarInfoCodigoBarras(codigo){
-  // Primero comida (Open Food Facts, la base más grande y completa).
-  // Si no está ahí, probamos con Open Products Facts, su proyecto hermano
-  // para todo lo que no es comida (librería, limpieza, etc). Tiene mucha
-  // menos data y casi nada en español, así que falla seguido, pero cuando
-  // tiene el producto cargado el resultado es igual de confiable.
+  // 1) SEPA primero: es local (instantáneo, sin esperar red), es la fuente
+  // más confiable para productos argentinos, y cubre todos los rubros.
+  const tablaSepa = await cargarTablaSepaEan();
+  const enSepa = tablaSepa[codigo];
+  if(enSepa){
+    return { nombre: capitalizarBonito(enSepa[0]), marca: enSepa[1] || '', imagen: '' };
+  }
+  // 2) Si no está en SEPA, probamos Open Food Facts (comida) y su proyecto
+  // hermano Open Products Facts (todo lo demás) — bases más chicas para
+  // Argentina, pero a veces traen foto del producto, que SEPA no tiene.
   const enComida = await buscarEnBaseDeProductos('world.openfoodfacts.org', codigo);
   if(enComida) return enComida;
   return await buscarEnBaseDeProductos('world.openproductsfacts.org', codigo);
