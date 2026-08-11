@@ -26,6 +26,9 @@
   import {
     getFirestore, doc, getDoc, getDocFromCache, setDoc, updateDoc, collection, getDocs, addDoc, onSnapshot, query, where, enableIndexedDbPersistence
   } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-firestore.js";
+  import {
+    getFunctions, httpsCallable
+  } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-functions.js";
 
   const firebaseConfig = {
     apiKey: "AIzaSyAR3EfaWSJ5vQp2OjjTPa3RKMruLD9EGcs",
@@ -39,6 +42,7 @@
   const fbApp = initializeApp(firebaseConfig);
   const fbAuth = getAuth(fbApp);
   const fbDb = getFirestore(fbApp);
+  const fbFunciones = getFunctions(fbApp);
   try { await enableIndexedDbPersistence(fbDb); } catch(e) { /* varias pestañas abiertas u navegador viejo: seguimos solo-online */ }
 
   window.fbOnCambioAuth = (callback) => onAuthStateChanged(fbAuth, callback);
@@ -118,6 +122,20 @@
     return onSnapshot(q, snap => callback(snap.docs.map(d => ({ id: d.id, ...d.data() }))), () => {});
   };
   window.fbActualizarPedido = (pedidoId, datos) => updateDoc(doc(fbDb, 'pedidosPublicos', pedidoId), datos);
+
+  // Cobro dinámico con MercadoPago: la Cloud Function usa el Access Token
+  // del negocio (guardado en su propio documento privado) para crear el
+  // cobro — el token nunca sale del backend ni pasa por acá.
+  window.fbCrearPreferenciaPago = async (datos) => {
+    const llamar = httpsCallable(fbFunciones, 'crearPreferenciaPago');
+    const resultado = await llamar(datos);
+    return resultado.data;
+  };
+  window.fbEscucharPagoMP = (idPago, callback) => {
+    return onSnapshot(doc(fbDb, 'pagosMercadoPago', idPago), snap => {
+      callback(snap.exists() ? snap.data() : null);
+    }, () => {});
+  };
 
   // Cuentas creadas por Google: además del login de Google, exigimos una
   // contraseña propia (linkWithCredential la agrega a la MISMA cuenta, no
@@ -385,6 +403,7 @@ function migrarProductos(){
     if(state.negocio.catalogoIndexable === undefined) state.negocio.catalogoIndexable = false;
     if(state.negocio.logoUrl === undefined) state.negocio.logoUrl = '';
     if(state.negocio.portadaUrl === undefined) state.negocio.portadaUrl = '';
+    if(state.negocio.mercadoPagoAccessToken === undefined) state.negocio.mercadoPagoAccessToken = '';
   }
 }
 
@@ -2706,10 +2725,11 @@ function abrirModalCobrar(){
         <span>Total</span><span class="text-green-600">${money(total)}</span>
       </div>
       <div class="text-gray-600 font-semibold mb-2">¿Cómo paga?</div>
-      <div class="grid grid-cols-3 gap-2 mb-2">
+      <div class="grid ${state.negocio.mercadoPagoAccessToken ? 'grid-cols-2' : 'grid-cols-3'} gap-2 mb-2">
         <button onclick="mostrarVueltoParaVenta(${total})" class="tap card py-4 flex flex-col items-center gap-1 border-2 border-transparent"><span class="text-2xl">💵</span><span class="text-sm font-bold">Efectivo</span></button>
         <button onclick="confirmarVenta('transferencia')" class="tap card py-4 flex flex-col items-center gap-1 border-2 border-transparent"><span class="text-2xl">📲</span><span class="text-sm font-bold">Transfer.</span></button>
         <button onclick="elegirClienteFiado()" class="tap card py-4 flex flex-col items-center gap-1 border-2 border-transparent"><span class="text-2xl">📒</span><span class="text-sm font-bold">Fiado</span></button>
+        ${state.negocio.mercadoPagoAccessToken ? `<button onclick="cobrarConMercadoPago(${total})" class="tap card py-4 flex flex-col items-center gap-1 border-2 border-transparent"><span class="text-2xl">💳</span><span class="text-sm font-bold">MercadoPago</span></button>` : ''}
       </div>
     </div>
   `);
@@ -2819,13 +2839,20 @@ function crearClienteYFiar(){
 }
 
 let ultimaVentaId = null;
-function confirmarVenta(metodo, clienteId = null){
-  const items = Object.entries(carrito).filter(([,c])=>c>0).map(([id,c])=>({ productoId:id, cantidad:c }));
-  const combosVendidos = Object.entries(carritoCombos).filter(([,c])=>c>0).map(([id,c])=>({ comboId:id, cantidad:c }));
+// "precapturado" es solo para el cobro con MercadoPago: como el pago se
+// confirma en segundo plano (puede tardar), no hay que esperar a último
+// momento a leer el carrito EN VIVO — para entonces el cajero puede haber
+// vaciado el carrito o estar cobrándole a otro cliente. Se congelan los
+// items al generar el QR y se venden esos, pase lo que pase con el
+// carrito mientras tanto.
+function confirmarVenta(metodo, clienteId = null, precapturado = null){
+  const items = precapturado ? precapturado.items : Object.entries(carrito).filter(([,c])=>c>0).map(([id,c])=>({ productoId:id, cantidad:c }));
+  const combosVendidos = precapturado ? precapturado.combos : Object.entries(carritoCombos).filter(([,c])=>c>0).map(([id,c])=>({ comboId:id, cantidad:c }));
   if(!items.length && !combosVendidos.length) return;
   let total = 0, ganancia = 0;
   items.forEach(it => {
     const p = state.productos.find(x=>x.id===it.productoId);
+    if(!p) return;
     total += p.precio * it.cantidad;
     ganancia += (p.precio - p.costo) * it.cantidad;
     p.stock = Math.max(0, p.stock - it.cantidad);
@@ -2852,16 +2879,88 @@ function confirmarVenta(metodo, clienteId = null){
   }
   ultimaVentaId = venta.id;
   guardar();
-  carrito = {};
-  carritoCombos = {};
-  cerrarModal();
-  ir('#/inicio');
+  if(!precapturado){
+    carrito = {};
+    carritoCombos = {};
+    cerrarModal();
+    ir('#/inicio');
+  }
   renderApp();
   toast(`¡Venta registrada! ${money(total)}`, { icon:'✅', acciones:[
     { fn:'deshacerVenta()', texto:'Deshacer' },
     { fn:`imprimirComprobante('${venta.id}')`, texto:'🖨️ Imprimir' }
   ], duracion: 7000 });
 }
+
+/* ---- Cobro dinámico con MercadoPago ---- */
+// Mapa (no una sola variable) porque puede haber más de un cobro
+// esperando pago al mismo tiempo: el cajero cierra la pantalla del QR de
+// un cliente lento y empieza a cobrarle a otro por MercadoPago también.
+const _pagosMPActivos = new Map(); // idPago -> función para dejar de escuchar
+async function cobrarConMercadoPago(total){
+  const items = Object.entries(carrito).filter(([,c])=>c>0).map(([id,c])=>({ productoId:id, cantidad:c }));
+  const combosVendidos = Object.entries(carritoCombos).filter(([,c])=>c>0).map(([id,c])=>({ comboId:id, cantidad:c }));
+  if(!items.length && !combosVendidos.length) return;
+  const idPago = uid();
+  abrirModal(`
+    <div class="p-5 text-center">
+      <div class="text-xl font-extrabold text-gray-900 mb-4">Cobro con MercadoPago</div>
+      <div id="mp-estado" data-id-pago="${idPago}" class="py-10">
+        ${icono('loader-circle','w-8 h-8 animate-spin mx-auto text-gray-300')}
+        <div class="text-gray-400 mt-3">Generando el cobro...</div>
+      </div>
+      <button onclick="cerrarModal()" class="tap w-full text-gray-400 font-semibold py-2 mt-2">Cerrar (el cobro sigue esperando el pago)</button>
+    </div>
+  `);
+  refrescarIconos();
+  let resultado;
+  try{
+    resultado = await conTimeout(window.fbCrearPreferenciaPago({ monto: total, descripcion: `Venta ${state.negocio.nombre}`, idPago }), 15000);
+  }catch(e){
+    const el = document.getElementById('mp-estado');
+    if(el && el.dataset.idPago === idPago){
+      el.innerHTML = `<div class="text-red-600 font-bold">No se pudo generar el cobro.</div><div class="text-gray-400 text-sm mt-1">${(e && e.message) || ''}</div>`;
+    }
+    return;
+  }
+  mostrarQrPagoMP(idPago, resultado.initPoint, total);
+  escucharPagoMP(idPago, items, combosVendidos, total);
+}
+function mostrarQrPagoMP(idPago, link, total){
+  const el = document.getElementById('mp-estado');
+  if(!el || el.dataset.idPago !== idPago) return; // se cerró/reemplazó esta pantalla mientras se generaba
+  const qr = qrcode(0, 'M');
+  qr.addData(link);
+  qr.make();
+  el.innerHTML = `
+    <img src="${qr.createDataURL(6,8)}" style="width:200px;height:200px;" class="mx-auto mb-3 rounded-xl" alt="QR de MercadoPago" />
+    <div class="text-gray-800 font-extrabold text-xl mb-1">${money(total)}</div>
+    <div class="text-gray-400 text-sm mb-3">Que el cliente escanee con su app de MercadoPago</div>
+    <div class="flex items-center justify-center gap-2 text-indigo-700">
+      ${icono('loader-circle','w-4 h-4 animate-spin')}
+      <span class="text-sm font-semibold">Esperando el pago...</span>
+    </div>
+  `;
+  refrescarIconos();
+}
+function escucharPagoMP(idPago, items, combosVendidos, total){
+  const unsub = window.fbEscucharPagoMP(idPago, (pago) => {
+    if(!pago || pago.estado === 'pendiente') return;
+    const dejarDeEscuchar = _pagosMPActivos.get(idPago);
+    if(dejarDeEscuchar) dejarDeEscuchar();
+    _pagosMPActivos.delete(idPago);
+    const el = document.getElementById('mp-estado');
+    const pantallaVisible = el && el.dataset.idPago === idPago;
+    if(pago.estado === 'aprobado'){
+      if(pantallaVisible) cerrarModal();
+      confirmarVenta('mercadopago', null, { items, combos: combosVendidos });
+    } else if(pantallaVisible){
+      el.innerHTML = `<div class="text-red-600 font-bold">El pago fue rechazado o cancelado.</div>`;
+    }
+  });
+  _pagosMPActivos.set(idPago, unsub);
+}
+
 function revertirVenta(venta){
   venta.items.forEach(it => {
     const p = state.productos.find(x=>x.id===it.productoId);
@@ -3646,6 +3745,7 @@ function vistaCierre(){
   const ventasHoy = state.ventas.filter(v=>v.fecha>=hoy);
   const efectivoVentas = ventasHoy.filter(v=>v.metodoPago==='efectivo').reduce((s,v)=>s+v.total,0);
   const transferenciaVentas = ventasHoy.filter(v=>v.metodoPago==='transferencia').reduce((s,v)=>s+v.total,0);
+  const mercadoPagoVentas = ventasHoy.filter(v=>v.metodoPago==='mercadopago').reduce((s,v)=>s+v.total,0);
   const fiadoVentas = ventasHoy.filter(v=>v.metodoPago==='fiado').reduce((s,v)=>s+v.total,0);
   const pagosFiadoHoy = state.fiadoMovimientos.filter(m=>m.tipo==='pago' && m.fecha>=hoy).reduce((s,m)=>s+m.monto,0);
   const gastosEfectivoHoy = state.gastos.filter(g=>g.fecha>=hoy && g.metodoPago==='efectivo').reduce((s,g)=>s+g.monto,0);
@@ -3658,6 +3758,7 @@ function vistaCierre(){
     <div class="flex flex-col gap-2">
       <div class="flex justify-between text-gray-700"><span>💵 Ventas en efectivo</span><span class="font-bold">${money(efectivoVentas)}</span></div>
       <div class="flex justify-between text-gray-700"><span>📲 Transferencias</span><span class="font-bold">${money(transferenciaVentas)}</span></div>
+      ${mercadoPagoVentas ? `<div class="flex justify-between text-gray-700"><span>💳 MercadoPago</span><span class="font-bold">${money(mercadoPagoVentas)}</span></div>` : ''}
       <div class="flex justify-between text-gray-700"><span>📒 Ventas fiadas</span><span class="font-bold">${money(fiadoVentas)}</span></div>
       <div class="flex justify-between text-gray-700"><span>💰 Cobros de fiado</span><span class="font-bold">${money(pagosFiadoHoy)}</span></div>
       ${gastosEfectivoHoy ? `<div class="flex justify-between text-red-600"><span>🧾 Gastos pagados en efectivo</span><span class="font-bold">-${money(gastosEfectivoHoy)}</span></div>` : ''}
@@ -4593,7 +4694,7 @@ function imprimirReporte(){
   `;
   window.print();
 }
-function iconoMetodo(m){ return m==='efectivo'?'💵':m==='transferencia'?'📲':'📒'; }
+function iconoMetodo(m){ return m==='efectivo'?'💵':m==='transferencia'?'📲':m==='mercadopago'?'💳':'📒'; }
 function verDetalleVenta(id){
   const venta = state.ventas.find(v=>v.id===id);
   if(!venta) return;
@@ -4733,6 +4834,14 @@ function vistaConfig(){
   </div>
 
   <div class="card p-4 mb-4">
+    <div class="font-bold text-gray-700 mb-1 text-lg">💳 Cobros con MercadoPago</div>
+    <div class="text-gray-500 text-sm mb-3">Pegá acá el Access Token de tu propia cuenta de MercadoPago (mercadopago.com.ar/developers/panel/app) para poder generar un cobro por el monto exacto de cada venta, con QR, en vez del link fijo de antes. El dinero entra directo a tu cuenta — nunca pasa por nosotros.</div>
+    <input id="cfg-mp-token" type="password" value="${state.negocio.mercadoPagoAccessToken||''}" placeholder="APP_USR-..." class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2 mb-3" />
+    <button onclick="guardarAccessTokenMP()" class="tap w-full bg-white border-2 border-gray-200 text-gray-700 font-bold py-3 rounded-2xl">${state.negocio.mercadoPagoAccessToken?'Actualizar token':'Guardar token'}</button>
+    ${state.negocio.mercadoPagoAccessToken ? `<div class="text-emerald-600 text-sm font-semibold mt-2 text-center">✅ Configurado — ya aparece la opción en la Caja</div>` : ''}
+  </div>
+
+  <div class="card p-4 mb-4">
     <div class="font-bold text-gray-700 mb-1 text-lg">🔐 Tu cuenta</div>
     <div class="text-gray-500 text-sm mb-3">${usuarioFirebase ? usuarioFirebase.email : ''}</div>
     <button onclick="cerrarSesionApp()" class="tap w-full bg-white border-2 border-gray-200 text-gray-700 font-bold py-3.5 rounded-2xl">Cerrar sesión</button>
@@ -4795,6 +4904,12 @@ function cambiarCatalogoIndexable(valor){
 function guardarCatalogoPublicoImagenes(){
   state.negocio.logoUrl = document.getElementById('cfg-logo').value.trim();
   state.negocio.portadaUrl = document.getElementById('cfg-portada').value.trim();
+  guardar();
+  renderApp();
+  toast('Guardado', {icon:'✅'});
+}
+function guardarAccessTokenMP(){
+  state.negocio.mercadoPagoAccessToken = document.getElementById('cfg-mp-token').value.trim();
   guardar();
   renderApp();
   toast('Guardado', {icon:'✅'});
