@@ -11,6 +11,7 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script src="https://unpkg.com/@zxing/library@latest"></script>
 <script src="https://unpkg.com/lucide@latest"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
 <script type="module">
   // Firebase: cuentas reales (email/contraseña + Google) y datos en la nube.
   // Se importa como módulo ES directo desde el CDN de Google: cero instalación,
@@ -23,7 +24,7 @@
     EmailAuthProvider, linkWithCredential
   } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-auth.js";
   import {
-    getFirestore, doc, getDoc, getDocFromCache, setDoc, updateDoc, collection, getDocs, enableIndexedDbPersistence
+    getFirestore, doc, getDoc, getDocFromCache, setDoc, updateDoc, collection, getDocs, addDoc, onSnapshot, query, where, enableIndexedDbPersistence
   } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-firestore.js";
 
   const firebaseConfig = {
@@ -96,6 +97,27 @@
     return snap.exists() ? snap.data() : { linkMercadoPago: '' };
   };
   window.fbGuardarConfigPagos = (datos) => setDoc(doc(fbDb, 'config', 'pagos'), datos);
+
+  // Catálogo público: un espejo aparte de "negocios/{uid}" con SOLO lo que
+  // puede ver cualquiera sin login (nombre, precio, foto, disponibilidad).
+  // Nunca el documento completo del negocio, que tiene costos, clientes,
+  // fiado, etc. Así las reglas de Firestore pueden permitir lectura pública
+  // de esta colección sin exponer nada sensible.
+  window.fbGuardarCatalogoPublico = (uid, datos) => setDoc(doc(fbDb, 'catalogosPublicos', uid), datos);
+  window.fbCargarCatalogoPublico = async (uid) => {
+    const snap = await getDoc(doc(fbDb, 'catalogosPublicos', uid));
+    return snap.exists() ? snap.data() : null;
+  };
+  // Pedidos que manda un cliente desde el catálogo público (sin login): se
+  // pueden CREAR sin auth, pero solo el dueño del negocio (auth.uid ==
+  // negocioUid del pedido) puede leerlos/actualizarlos — eso lo exige la
+  // regla de Firestore, no este archivo.
+  window.fbCrearPedidoPublico = (datos) => addDoc(collection(fbDb, 'pedidosPublicos'), datos);
+  window.fbEscucharPedidos = (uid, callback) => {
+    const q = query(collection(fbDb, 'pedidosPublicos'), where('negocioUid', '==', uid));
+    return onSnapshot(q, snap => callback(snap.docs.map(d => ({ id: d.id, ...d.data() }))), () => {});
+  };
+  window.fbActualizarPedido = (pedidoId, datos) => updateDoc(doc(fbDb, 'pedidosPublicos', pedidoId), datos);
 
   // Cuentas creadas por Google: además del login de Google, exigimos una
   // contraseña propia (linkWithCredential la agrega a la MISMA cuenta, no
@@ -288,6 +310,24 @@ let suscripcionActual = null; // suscripción del negocio logueado (dueños)
 let listaSuscripciones = [];  // todas las suscripciones (solo panel admin)
 let configPagos = { linkMercadoPago: '' };
 
+/* Pedidos entrantes del catálogo público (?tienda=uid), en vivo. Se
+   escuchan una sola vez por sesión iniciada (onSnapshot), no por cada visita
+   a la pantalla de Pedidos, para poder mostrar el contador de "nuevos" desde
+   cualquier parte de la app. */
+let pedidosEntrantes = [];
+let _detenerEscuchaPedidos = null;
+function iniciarEscuchaPedidos(uid){
+  if(_detenerEscuchaPedidos) return; // ya está escuchando
+  _detenerEscuchaPedidos = window.fbEscucharPedidos(uid, (pedidos) => {
+    pedidosEntrantes = pedidos.sort((a,b) => (b.fecha||0)-(a.fecha||0));
+    renderApp();
+  });
+}
+function detenerEscuchaPedidos(){
+  if(_detenerEscuchaPedidos){ _detenerEscuchaPedidos(); _detenerEscuchaPedidos = null; }
+  pedidosEntrantes = [];
+}
+
 /* ====================== CONTRASEÑA OBLIGATORIA PARA CUENTAS DE GOOGLE ======================
    Toda cuenta tiene que poder entrar también con mail+contraseña (no solo con
    Google), para no depender de un solo método. Estos dos flags gatean la
@@ -339,6 +379,13 @@ function migrarProductos(){
     if(p.proveedorId === undefined) p.proveedorId = '';
     if(p.codigoBarras === undefined) p.codigoBarras = '';
   });
+  if(state.negocio){
+    if(state.negocio.telefono === undefined) state.negocio.telefono = '';
+    if(state.negocio.catalogoPublico === undefined) state.negocio.catalogoPublico = false;
+    if(state.negocio.catalogoIndexable === undefined) state.negocio.catalogoIndexable = false;
+    if(state.negocio.logoUrl === undefined) state.negocio.logoUrl = '';
+    if(state.negocio.portadaUrl === undefined) state.negocio.portadaUrl = '';
+  }
 }
 
 let guardarTimeout = null;
@@ -349,7 +396,33 @@ function guardar(){
     window.fbGuardarNegocio(usuarioFirebase.uid, state).catch(() => {
       toast('No se pudo guardar en la nube. Revisá tu conexión.', { icon:'⚠️', duracion:4000 });
     });
+    sincronizarCatalogoPublico();
   }, 400);
+}
+
+// Espejo público de "negocios/{uid}", solo con lo que puede ver cualquiera
+// sin login. Se sube solo cada vez que se guarda algo, mientras el catálogo
+// público esté activado — así el catálogo que ve el cliente nunca queda
+// desactualizado respecto a precios/stock reales.
+function sincronizarCatalogoPublico(){
+  if(!usuarioFirebase || !state.negocio || !state.negocio.catalogoPublico) return;
+  const datos = {
+    nombre: state.negocio.nombre,
+    telefono: state.negocio.telefono || '',
+    logoUrl: state.negocio.logoUrl || '',
+    portadaUrl: state.negocio.portadaUrl || '',
+    indexable: !!state.negocio.catalogoIndexable,
+    categorias: state.categorias.map(c => ({ id: c.id, nombre: c.nombre, emoji: c.emoji })),
+    productos: state.productos.map(p => ({
+      id: p.id, nombre: p.nombre, marca: p.marca || '', precio: p.precio,
+      emoji: p.emoji, imagen: p.imagen || '', categoriaId: p.categoriaId || '',
+      disponible: p.stock > 0, contenidoCantidad: p.contenidoCantidad, contenidoUnidad: p.contenidoUnidad
+    }))
+  };
+  window.fbGuardarCatalogoPublico(usuarioFirebase.uid, datos).catch(() => {});
+}
+function urlCatalogoPublico(){
+  return `${location.origin}${location.pathname}?tienda=${usuarioFirebase.uid}`;
 }
 
 function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
@@ -1561,6 +1634,14 @@ function ejecutarConfirmacion(){
 /* ====================== ROUTER ====================== */
 window.addEventListener('hashchange', renderApp);
 window.addEventListener('DOMContentLoaded', () => {
+  // Catálogo público (?tienda=uid): página completamente aparte, sin login,
+  // que cualquiera puede abrir escaneando el QR del negocio. No toca Firebase
+  // Auth ni el estado privado del negocio — solo lee el espejo público.
+  const uidTiendaPublica = new URLSearchParams(location.search).get('tienda');
+  if(uidTiendaPublica){
+    arrancarCatalogoPublico(uidTiendaPublica);
+    return;
+  }
   aplicarTamanoLetra();
   renderApp(); // pantalla de carga mientras Firebase confirma la sesión
   // Red de seguridad: si por lo que sea Firebase nunca llega a avisarnos si
@@ -1653,6 +1734,7 @@ window.addEventListener('DOMContentLoaded', () => {
       }
     } else {
       state = estadoVacio();
+      detenerEscuchaPedidos();
       // Si "Continuar con Google" falló porque ese mail ya tenía cuenta con
       // contraseña, no mostramos solo un error: pedimos esa contraseña acá
       // mismo para unir las dos formas de entrar a la misma cuenta.
@@ -1669,6 +1751,7 @@ window.addEventListener('DOMContentLoaded', () => {
     aplicarTamanoLetra();
     if(!location.hash || location.hash === '#/' || location.hash === '#'){ location.hash = '#/inicio'; }
     renderApp();
+    if(user && state.negocio) iniciarEscuchaPedidos(user.uid);
     if(!user && window.__errorRedirectGoogle && !vinculandoGoogleEmail){
       toast(traducirErrorFirebase(window.__errorRedirectGoogle), { icon:'⚠️', duracion:5000 });
     }
@@ -1774,6 +1857,7 @@ function renderApp(){
     case 'clientes': contenido = vistaClientes(); break;
     case 'reportes': contenido = vistaReportes(); break;
     case 'config': contenido = vistaConfig(); break;
+    case 'pedidos': contenido = vistaPedidos(); break;
     default: contenido = vistaInicio();
   }
   mostrar(`
@@ -4065,8 +4149,10 @@ function vistaMas(){
     ? state.productos.filter(p => p.temporada && p.temporada !== temporadaActual()).length
     : state.productos.filter(p => p.vencimiento && estadoVencimiento(p.vencimiento).dias <= 7).length;
   const porPedir = state.proveedores.filter(prov => state.productos.some(p=>p.proveedorId===prov.id && p.stock<=p.stockMin)).length;
+  const pedidosNuevos = pedidosEntrantes.filter(p => p.estado === 'nuevo').length;
   return `
   <div class="grid cards-grid gap-3 mt-2">
+    ${accesoMas('#/pedidos','🛍️','Pedidos', pedidosNuevos)}
     ${esRubroRopa() ? accesoMas('#/vencimientos','🌦️','Temporadas', urgentes) : accesoMas('#/vencimientos','⏳','Vencimientos', urgentes)}
     ${accesoMas('#/cierre','🧮','Cierre de caja')}
     ${accesoMas('#/proveedores','🚚','Proveedores', porPedir)}
@@ -4125,6 +4211,54 @@ function enviarPedidoResena(){
   const msg = `¡Hola ${nombre}! Somos ${state.negocio.nombre}. Si te gustó tu compra, nos ayudaría muchísimo que nos dejes una reseña en Google. ¡Gracias! 🙏`;
   window.open(`https://wa.me/${limpiarTelefono(telefono)}?text=${encodeURIComponent(msg)}`, '_blank');
   cerrarModal();
+}
+
+/* ====================== PEDIDOS (del catálogo público) ====================== */
+function vistaPedidos(){
+  if(!state.negocio.catalogoPublico){
+    return `
+    <div class="text-center py-16 text-gray-400 px-6">
+      <div class="text-5xl mb-3">🛍️</div>
+      <div class="font-bold text-gray-600 mb-2">Todavía no activaste el catálogo público</div>
+      <div class="mb-4">Activalo para que tus clientes puedan hacerte pedidos desde ahí.</div>
+      <button onclick="ir('#/config')" class="tap bg-indigo-700 text-white font-bold py-3 px-6 rounded-2xl">Ir a Configuración</button>
+    </div>`;
+  }
+  if(!pedidosEntrantes.length){
+    return `<div class="text-center py-16 text-gray-400"><div class="text-5xl mb-3">🛍️</div>Todavía no te llegó ningún pedido</div>`;
+  }
+  const etiquetaEstado = { nuevo: ['Nuevo','bg-red-100 text-red-700'], visto: ['Visto','bg-amber-100 text-amber-700'], completado: ['Completado','bg-emerald-100 text-emerald-700'] };
+  return pedidosEntrantes.map(p => {
+    const [etTxt, etClase] = etiquetaEstado[p.estado] || etiquetaEstado.nuevo;
+    return `
+    <div class="card p-4 mb-3">
+      <div class="flex items-center justify-between mb-2">
+        <div class="font-bold text-gray-800">${p.clienteNombre || 'Cliente sin nombre'}</div>
+        <span class="text-xs font-bold px-2.5 py-1 rounded-full ${etClase}">${etTxt}</span>
+      </div>
+      <div class="text-gray-400 text-xs mb-2">${p.fecha ? fechaHora(p.fecha) : ''}</div>
+      <div class="flex flex-col gap-1 mb-2">
+        ${(p.items||[]).map(it => `<div class="text-sm text-gray-600 flex justify-between"><span>${it.cantidad} x ${it.nombre}</span><span>${money(it.precio*it.cantidad)}</span></div>`).join('')}
+      </div>
+      <div class="flex justify-between font-bold text-gray-800 border-t border-gray-100 pt-2 mb-3">
+        <span>Total</span><span>${money(p.total)}</span>
+      </div>
+      <div class="grid grid-cols-2 gap-2">
+        ${p.clienteTelefono ? `<a href="https://wa.me/${limpiarTelefono(p.clienteTelefono)}" target="_blank" class="tap bg-green-50 text-green-700 font-bold py-2.5 rounded-xl text-center text-sm">💬 WhatsApp</a>` : `<span></span>`}
+        ${p.estado !== 'completado'
+          ? `<button onclick="cambiarEstadoPedido('${p.id}','${p.estado==='nuevo'?'visto':'completado'}')" class="tap bg-indigo-700 text-white font-bold py-2.5 rounded-xl text-sm">${p.estado==='nuevo'?'Marcar visto':'Completar'}</button>`
+          : `<span></span>`}
+      </div>
+    </div>`;
+  }).join('');
+}
+function cambiarEstadoPedido(id, estado){
+  const p = pedidosEntrantes.find(x=>x.id===id);
+  if(p) p.estado = estado; // se corrige solo con el próximo snapshot si esto falla
+  renderApp();
+  window.fbActualizarPedido(id, { estado }).catch(() => {
+    toast('No se pudo actualizar el pedido', {icon:'⚠️'});
+  });
 }
 
 /* ====================== CLIENTES ====================== */
@@ -4493,7 +4627,39 @@ function vistaConfig(){
     <div class="w-full bg-gray-50 border-2 border-gray-100 rounded-2xl px-4 py-3 text-lg my-2 text-gray-500">${nombreRubro(state.negocio.tipo)} <span class="text-sm">(no se puede cambiar)</span></div>
     <label class="font-semibold text-gray-600">Meta de venta diaria (opcional)</label>
     <input id="cfg-meta" type="number" inputmode="decimal" value="${state.metaDiaria||''}" placeholder="Ej: 50000" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2" />
+    <label class="font-semibold text-gray-600">WhatsApp del negocio (opcional)</label>
+    <input id="cfg-telefono" value="${state.negocio.telefono||''}" placeholder="Ej: 1122334455" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2" />
     <button onclick="guardarConfig()" class="tap w-full bg-indigo-700 text-white font-bold py-3.5 rounded-2xl text-lg mt-2">Guardar cambios</button>
+  </div>
+
+  <div class="card p-4 mb-4">
+    <div class="font-bold text-gray-700 mb-1 text-lg">🌐 Catálogo público</div>
+    <div class="text-gray-500 text-sm mb-3">Un link con QR para que tus clientes vean tus productos y precios sin instalar nada, y te hagan pedidos por WhatsApp o desde la web. Sin límite de escaneos.</div>
+    <div class="grid grid-cols-2 gap-2 mb-3">
+      <button onclick="cambiarCatalogoPublico(true)" class="tap py-3 rounded-2xl font-bold border-2 ${state.negocio.catalogoPublico?'bg-indigo-700 text-white border-indigo-700':'bg-white text-gray-600 border-gray-200'}">Activado</button>
+      <button onclick="cambiarCatalogoPublico(false)" class="tap py-3 rounded-2xl font-bold border-2 ${!state.negocio.catalogoPublico?'bg-indigo-700 text-white border-indigo-700':'bg-white text-gray-600 border-gray-200'}">Desactivado</button>
+    </div>
+    ${state.negocio.catalogoPublico ? `
+    <div class="bg-gray-50 rounded-2xl p-4 flex flex-col items-center mb-3">
+      <img src="${dataUrlQrCatalogo()}" alt="QR del catálogo" class="w-44 h-44 mb-2" />
+      <div class="text-xs text-gray-400 break-all text-center mb-2">${urlCatalogoPublico()}</div>
+      <div class="grid grid-cols-2 gap-2 w-full">
+        <button onclick="copiarLinkCatalogo()" class="tap bg-white border-2 border-gray-200 text-gray-700 font-bold py-2.5 rounded-xl text-sm">Copiar link</button>
+        <button onclick="descargarQrCatalogo()" class="tap bg-white border-2 border-gray-200 text-gray-700 font-bold py-2.5 rounded-xl text-sm">Descargar QR</button>
+      </div>
+      <a href="${urlCatalogoPublico()}" target="_blank" class="tap w-full text-center text-indigo-700 font-bold text-sm mt-3">Ver cómo lo ven tus clientes →</a>
+    </div>
+    <label class="font-semibold text-gray-600 text-sm">¿Que Google lo pueda encontrar en sus búsquedas?</label>
+    <div class="grid grid-cols-2 gap-2 mt-1 mb-3">
+      <button onclick="cambiarCatalogoIndexable(true)" class="tap py-2.5 rounded-xl font-bold border-2 text-sm ${state.negocio.catalogoIndexable?'bg-indigo-700 text-white border-indigo-700':'bg-white text-gray-600 border-gray-200'}">Sí</button>
+      <button onclick="cambiarCatalogoIndexable(false)" class="tap py-2.5 rounded-xl font-bold border-2 text-sm ${!state.negocio.catalogoIndexable?'bg-indigo-700 text-white border-indigo-700':'bg-white text-gray-600 border-gray-200'}">No</button>
+    </div>
+    <label class="font-semibold text-gray-600 text-sm">Logo (link a una imagen)</label>
+    <input id="cfg-logo" value="${state.negocio.logoUrl||''}" placeholder="https://..." class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2 mb-2" />
+    <label class="font-semibold text-gray-600 text-sm">Portada (link a una imagen)</label>
+    <input id="cfg-portada" value="${state.negocio.portadaUrl||''}" placeholder="https://..." class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2 mb-3" />
+    <button onclick="guardarCatalogoPublicoImagenes()" class="tap w-full bg-white border-2 border-gray-200 text-gray-700 font-bold py-3 rounded-2xl">Guardar logo y portada</button>
+    ` : ''}
   </div>
 
   <div class="card p-4 mb-4">
@@ -4539,9 +4705,49 @@ function vistaConfig(){
 function guardarConfig(){
   state.negocio.nombre = document.getElementById('cfg-nombre').value.trim() || state.negocio.nombre;
   state.metaDiaria = parseFloat(document.getElementById('cfg-meta').value) || 0;
+  state.negocio.telefono = document.getElementById('cfg-telefono').value.trim();
   guardar();
   renderApp();
   toast('Datos guardados', {icon:'✅'});
+}
+
+/* ---- Catálogo público ---- */
+function cambiarCatalogoPublico(activo){
+  state.negocio.catalogoPublico = activo;
+  guardar();
+  renderApp();
+}
+function cambiarCatalogoIndexable(valor){
+  state.negocio.catalogoIndexable = valor;
+  guardar();
+  renderApp();
+}
+function guardarCatalogoPublicoImagenes(){
+  state.negocio.logoUrl = document.getElementById('cfg-logo').value.trim();
+  state.negocio.portadaUrl = document.getElementById('cfg-portada').value.trim();
+  guardar();
+  renderApp();
+  toast('Guardado', {icon:'✅'});
+}
+function dataUrlQrCatalogo(){
+  if(typeof qrcode === 'undefined') return '';
+  const qr = qrcode(0, 'M'); // 0 = detecta el tamaño solo según el largo del link
+  qr.addData(urlCatalogoPublico());
+  qr.make();
+  return qr.createDataURL(6, 8);
+}
+function copiarLinkCatalogo(){
+  navigator.clipboard.writeText(urlCatalogoPublico())
+    .then(() => toast('Link copiado', {icon:'📋'}))
+    .catch(() => toast('No se pudo copiar. Copialo a mano.', {icon:'⚠️'}));
+}
+function descargarQrCatalogo(){
+  const a = document.createElement('a');
+  a.href = dataUrlQrCatalogo();
+  a.download = `qr-catalogo-${(state.negocio.nombre||'negocio').toLowerCase().replace(/\s+/g,'-')}.png`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
 }
 
 /* ---- Usuarios / Vendedores (PIN) ---- */
@@ -4733,6 +4939,202 @@ function borrarTodo(){
       renderApp();
     }, 'Sí, borrar todo');
   }, 'Continuar');
+}
+
+/* ====================== CATÁLOGO PÚBLICO (?tienda=uid) ======================
+   Página completamente aparte de la app: sin login, la abre cualquier
+   cliente escaneando el QR del negocio. Solo lee "catalogosPublicos/{uid}"
+   (el espejo público, nunca el negocio real) y solo escribe pedidos nuevos
+   en "pedidosPublicos" — jamás toca los datos privados del comercio. */
+let catalogoPublicoUid = '';
+let catalogoPublicoDatos = null;
+let carritoPublico = [];       // [{productoId, cantidad}]
+let busquedaPublico = '';
+let categoriaPublico = '';
+
+async function arrancarCatalogoPublico(uidNegocio){
+  catalogoPublicoUid = uidNegocio;
+  document.getElementById('app').innerHTML = `<div class="flex items-center justify-center py-24 text-gray-300">${icono('loader-circle','w-8 h-8 animate-spin')}</div>`;
+  refrescarIconos();
+  try{
+    catalogoPublicoDatos = await conTimeout(window.fbCargarCatalogoPublico(uidNegocio), 10000);
+  }catch(e){
+    catalogoPublicoDatos = null;
+  }
+  if(!catalogoPublicoDatos){
+    document.getElementById('app').innerHTML = `
+      <div class="flex flex-col items-center justify-center text-center py-24 px-6">
+        <div class="text-5xl mb-3">🔍</div>
+        <div class="text-xl font-bold text-gray-800 mb-1">No encontramos este catálogo</div>
+        <div class="text-gray-400">El link puede estar mal escrito, o el negocio todavía no lo activó.</div>
+      </div>`;
+    return;
+  }
+  document.title = catalogoPublicoDatos.nombre + ' · Catálogo';
+  const metaRobots = document.createElement('meta');
+  metaRobots.name = 'robots';
+  metaRobots.content = catalogoPublicoDatos.indexable ? 'index, follow' : 'noindex, nofollow';
+  document.head.appendChild(metaRobots);
+  renderCatalogoPublico();
+}
+
+function renderCatalogoPublico(){
+  const app = document.getElementById('app');
+  const activo = document.activeElement;
+  const idActivo = (activo && app.contains(activo) && activo.id) ? activo.id : null;
+  const selStart = idActivo && 'selectionStart' in activo ? activo.selectionStart : null;
+  const d = catalogoPublicoDatos;
+  const categoriasConProductos = d.categorias.filter(c => d.productos.some(p => p.categoriaId === c.id));
+  const q = normalizarTexto(busquedaPublico);
+  let productos = d.productos;
+  if(categoriaPublico) productos = productos.filter(p => p.categoriaId === categoriaPublico);
+  if(q) productos = productos.filter(p => normalizarTexto(p.nombre).includes(q) || normalizarTexto(p.marca||'').includes(q));
+  const cantCarrito = carritoPublico.reduce((s,it)=>s+it.cantidad,0);
+  const totalCarrito = carritoPublico.reduce((s,it) => {
+    const p = d.productos.find(x=>x.id===it.productoId);
+    return s + (p ? p.precio*it.cantidad : 0);
+  }, 0);
+
+  app.innerHTML = `
+    ${d.portadaUrl ? `<div class="w-full h-32 bg-gray-100 bg-cover bg-center" style="background-image:url('${d.portadaUrl}')"></div>` : ''}
+    <div class="px-4 ${d.portadaUrl ? '-mt-8' : 'pt-5'} pb-3 flex items-end gap-3">
+      ${d.logoUrl
+        ? `<img src="${d.logoUrl}" class="w-16 h-16 rounded-2xl object-cover border-4 border-white shadow bg-white" />`
+        : `<div class="w-16 h-16 rounded-2xl bg-indigo-700 text-white flex items-center justify-center text-2xl font-extrabold border-4 border-white shadow flex-shrink-0">${(d.nombre||'?').charAt(0).toUpperCase()}</div>`}
+      <div class="pb-1 min-w-0">
+        <div class="text-xl font-extrabold text-gray-900 leading-tight truncate">${d.nombre}</div>
+        <div class="text-gray-400 text-sm">Catálogo digital</div>
+      </div>
+    </div>
+    <div class="px-4">
+      <input id="cat-pub-buscar" value="${busquedaPublico}" oninput="filtrarCatalogoPublico(this.value)" placeholder="Buscar producto..." class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg mb-3" />
+      ${categoriasConProductos.length ? `
+      <div class="flex gap-2 overflow-x-auto pb-3 mb-1">
+        <button onclick="filtrarCategoriaPublico('')" class="tap flex-shrink-0 px-4 py-2 rounded-full font-bold text-sm ${!categoriaPublico?'bg-indigo-700 text-white':'bg-gray-100 text-gray-600'}">Todo</button>
+        ${categoriasConProductos.map(c => `<button onclick="filtrarCategoriaPublico('${c.id}')" class="tap flex-shrink-0 px-4 py-2 rounded-full font-bold text-sm ${categoriaPublico===c.id?'bg-indigo-700 text-white':'bg-gray-100 text-gray-600'}">${c.emoji||''} ${c.nombre}</button>`).join('')}
+      </div>` : ''}
+    </div>
+    <div class="px-4 grid grid-cols-2 gap-3 pb-28">
+      ${productos.length ? productos.map(p => `
+        <div class="card p-3 flex flex-col">
+          <div class="flex justify-center mb-2">${iconoProducto(p,'w-16 h-16','text-5xl')}</div>
+          <div class="font-bold text-gray-800 text-sm leading-tight mb-1" style="min-height:2.5em;">${p.nombre}</div>
+          <div class="text-indigo-700 font-extrabold mb-2">${money(p.precio)}</div>
+          ${p.disponible
+            ? `<button onclick="agregarAlCarritoPublico('${p.id}')" class="tap w-full bg-indigo-700 text-white font-bold py-2 rounded-xl text-sm">+ Agregar</button>`
+            : `<div class="w-full text-center text-gray-300 font-bold py-2 text-sm">Sin stock</div>`}
+        </div>
+      `).join('') : `<div class="col-span-2 text-center py-16 text-gray-400">No encontramos productos</div>`}
+    </div>
+    ${cantCarrito ? `
+    <button onclick="mostrarCarritoPublico()" class="tap fixed bottom-4 left-4 right-4 max-w-lg mx-auto bg-indigo-700 text-white font-bold py-4 rounded-2xl shadow-lg flex items-center justify-between px-6 z-30">
+      <span>🛒 ${cantCarrito} producto${cantCarrito===1?'':'s'}</span>
+      <span>${money(totalCarrito)}</span>
+    </button>` : ''}
+  `;
+  refrescarIconos();
+  if(idActivo){
+    const el = document.getElementById(idActivo);
+    if(el){ el.focus(); if(selStart !== null && el.setSelectionRange){ try{ el.setSelectionRange(selStart, selStart); }catch(e){} } }
+  }
+}
+function filtrarCatalogoPublico(v){ busquedaPublico = v; renderCatalogoPublico(); }
+function filtrarCategoriaPublico(id){ categoriaPublico = id; renderCatalogoPublico(); }
+function agregarAlCarritoPublico(productoId){
+  const it = carritoPublico.find(x=>x.productoId===productoId);
+  if(it) it.cantidad++; else carritoPublico.push({ productoId, cantidad: 1 });
+  renderCatalogoPublico();
+  const estaEnCarrito = document.getElementById('modal-wrap').style.display === 'block';
+  if(estaEnCarrito) mostrarCarritoPublico();
+  else toast('Agregado al carrito', { icon:'🛒', duracion:1500 });
+}
+function quitarDelCarritoPublico(productoId){
+  const it = carritoPublico.find(x=>x.productoId===productoId);
+  if(!it) return;
+  it.cantidad--;
+  if(it.cantidad<=0) carritoPublico = carritoPublico.filter(x=>x.productoId!==productoId);
+  renderCatalogoPublico();
+  mostrarCarritoPublico();
+}
+function mostrarCarritoPublico(){
+  const d = catalogoPublicoDatos;
+  const items = carritoPublico.map(it => ({ ...it, p: d.productos.find(x=>x.id===it.productoId) })).filter(x=>x.p);
+  const total = items.reduce((s,x)=>s+x.p.precio*x.cantidad, 0);
+  abrirModal(`
+    <div class="p-5">
+      <div class="text-xl font-extrabold text-gray-900 mb-4">Tu pedido</div>
+      <div class="flex flex-col gap-3 mb-4 max-h-64 overflow-y-auto">
+        ${items.length ? items.map(x => `
+          <div class="flex items-center justify-between gap-2">
+            <div class="flex-1 min-w-0">
+              <div class="font-bold text-gray-800 text-sm truncate">${x.p.nombre}</div>
+              <div class="text-gray-400 text-xs">${money(x.p.precio)} c/u</div>
+            </div>
+            <div class="flex items-center gap-2 flex-shrink-0">
+              <button onclick="quitarDelCarritoPublico('${x.p.id}')" class="tap w-8 h-8 rounded-full bg-gray-100 font-bold">-</button>
+              <span class="font-bold w-5 text-center">${x.cantidad}</span>
+              <button onclick="agregarAlCarritoPublico('${x.p.id}')" class="tap w-8 h-8 rounded-full bg-gray-100 font-bold">+</button>
+            </div>
+          </div>
+        `).join('') : `<div class="text-gray-400 text-center py-6">Carrito vacío</div>`}
+      </div>
+      ${items.length ? `
+      <div class="flex justify-between font-extrabold text-lg mb-4 pt-3 border-t border-gray-100">
+        <span>Total</span><span>${money(total)}</span>
+      </div>
+      <label class="font-semibold text-gray-600 text-sm">Tu nombre</label>
+      <input id="pub-nombre" placeholder="Nombre" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2 mb-2" />
+      <label class="font-semibold text-gray-600 text-sm">Tu WhatsApp</label>
+      <input id="pub-telefono" placeholder="Ej: 1122334455" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2 mb-4" />
+      <button onclick="enviarPedidoPublicoWhatsApp()" class="tap w-full bg-green-600 text-white font-bold py-4 rounded-2xl text-lg mb-2">💬 Pedir por WhatsApp</button>
+      <button onclick="enviarPedidoPublicoWeb()" class="tap w-full bg-indigo-700 text-white font-bold py-4 rounded-2xl text-lg mb-2">Enviar pedido</button>
+      ` : ''}
+      <button onclick="cerrarModal()" class="tap w-full text-gray-400 font-semibold py-2">Seguir viendo</button>
+    </div>
+  `);
+}
+function textoPedidoPublico(items, total){
+  let txt = 'Hola! Quiero hacer un pedido:\n\n';
+  items.forEach(x => { txt += `• ${x.cantidad} x ${x.p.nombre} — ${money(x.p.precio*x.cantidad)}\n`; });
+  txt += `\nTotal: ${money(total)}`;
+  return txt;
+}
+function enviarPedidoPublicoWhatsApp(){
+  const d = catalogoPublicoDatos;
+  const items = carritoPublico.map(it => ({ ...it, p: d.productos.find(x=>x.id===it.productoId) })).filter(x=>x.p);
+  if(!items.length) return;
+  if(!d.telefono){ toast('Este negocio todavía no cargó su WhatsApp', { icon:'📵' }); return; }
+  const total = items.reduce((s,x)=>s+x.p.precio*x.cantidad, 0);
+  const nombre = (document.getElementById('pub-nombre')?.value || '').trim();
+  let txt = textoPedidoPublico(items, total);
+  if(nombre) txt = `Soy ${nombre}. ` + txt;
+  window.open(`https://wa.me/${limpiarTelefono(d.telefono)}?text=${encodeURIComponent(txt)}`, '_blank');
+}
+async function enviarPedidoPublicoWeb(){
+  const d = catalogoPublicoDatos;
+  const items = carritoPublico.map(it => ({ ...it, p: d.productos.find(x=>x.id===it.productoId) })).filter(x=>x.p);
+  if(!items.length) return;
+  const nombre = (document.getElementById('pub-nombre')?.value || '').trim();
+  const telefono = (document.getElementById('pub-telefono')?.value || '').trim();
+  if(!telefono){ toast('Dejanos tu WhatsApp para poder avisarte', { icon:'📵' }); return; }
+  const total = items.reduce((s,x)=>s+x.p.precio*x.cantidad, 0);
+  try{
+    await window.fbCrearPedidoPublico({
+      negocioUid: catalogoPublicoUid,
+      clienteNombre: nombre,
+      clienteTelefono: telefono,
+      items: items.map(x => ({ productoId: x.p.id, nombre: x.p.nombre, cantidad: x.cantidad, precio: x.p.precio })),
+      total,
+      estado: 'nuevo',
+      fecha: Date.now()
+    });
+    carritoPublico = [];
+    cerrarModal();
+    renderCatalogoPublico();
+    toast('¡Pedido enviado! Te van a contactar por WhatsApp para confirmar.', { icon:'✅', duracion:5000 });
+  }catch(e){
+    toast('No se pudo enviar el pedido. Probá pedirlo por WhatsApp.', { icon:'⚠️', duracion:4000 });
+  }
 }
 </script>
 </body>
