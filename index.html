@@ -2790,9 +2790,9 @@ function elegirClienteFiado(){
       <div class="text-gray-400 mb-4">Elegí el cliente o agregá uno nuevo</div>
       <div class="flex flex-col gap-2 max-h-64 overflow-y-auto mb-4">
         ${state.clientes.map(c => `
-          <button onclick="confirmarVenta('fiado','${c.id}')" class="tap card p-3 flex items-center justify-between text-left">
+          <button onclick="verificarLimiteFiado('${c.id}', ${total}, () => confirmarVenta('fiado','${c.id}'))" class="tap card p-3 flex items-center justify-between text-left">
             <span class="font-bold text-gray-800">👤 ${c.nombre}</span>
-            <span class="text-gray-400">${c.fiado>0?money(c.fiado)+' debe':''}</span>
+            <span class="text-gray-400 text-right">${c.fiado>0?money(c.fiado)+' debe':''}${c.limiteFiado>0?`<br><span class="text-xs">límite ${money(c.limiteFiado)}</span>`:''}</span>
           </button>`).join('')}
       </div>
       <button onclick="mostrarFormNuevoClienteFiado()" class="tap w-full bg-indigo-700 text-white font-bold py-3 rounded-xl">+ Nuevo cliente</button>
@@ -2813,7 +2813,7 @@ function crearClienteYFiar(){
   const nombre = document.getElementById('nc-nombre').value.trim();
   if(!nombre){ toast('Escribí el nombre del cliente', {icon:'✍️'}); return; }
   const telefono = document.getElementById('nc-telefono').value.trim();
-  const cliente = { id: uid(), nombre, telefono, fiado: 0 };
+  const cliente = { id: uid(), nombre, telefono, limiteFiado: 0, fiado: 0 };
   state.clientes.push(cliente);
   confirmarVenta('fiado', cliente.id);
 }
@@ -3039,7 +3039,10 @@ function vistaFiado(){
           <div class="font-bold text-gray-800 text-lg">👤 ${c.nombre}</div>
           <div class="text-gray-400 text-sm">${c.telefono || 'Sin teléfono'}</div>
         </div>
-        <div class="text-xl font-extrabold ${c.fiado>0 ? 'text-red-600' : 'text-green-600'}">${money(c.fiado||0)}</div>
+        <div class="text-right">
+          <div class="text-xl font-extrabold ${c.fiado>0 ? 'text-red-600' : 'text-green-600'}">${money(c.fiado||0)}</div>
+          ${c.limiteFiado>0 ? `<div class="text-gray-400 text-xs">límite ${money(c.limiteFiado)}</div>` : ''}
+        </div>
       </div>
       <div class="grid grid-cols-2 gap-2">
         ${c.fiado>0 ? `<button onclick="registrarPagoFiado('${c.id}')" class="tap bg-green-50 text-green-700 font-bold py-2.5 rounded-xl">💵 Registrar pago</button>` : `<button disabled class="bg-gray-50 text-gray-300 font-bold py-2.5 rounded-xl">Sin deuda</button>`}
@@ -3054,6 +3057,28 @@ function vistaFiado(){
   `;
 }
 function limpiarTelefono(t){ return (t||'').replace(/[^0-9]/g,''); }
+
+// Chequeo del límite de fiado: si el cliente no tiene límite cargado
+// (limiteFiado 0 o vacío), no se restringe nada — es una función opcional,
+// no todos los clientes tienen por qué tenerla. Si se pasaría del límite,
+// no se bloquea directamente: se le avisa al dueño con el detalle (cuánto
+// debe, cuánto pasaría a deber, cuál es el límite) y él decide si igual
+// quiere fiarle — la idea es que el límite ayude a no perder de vista la
+// deuda, no que le ate las manos al dueño con un cliente de confianza.
+function verificarLimiteFiado(clienteId, montoNuevo, callback){
+  const c = state.clientes.find(x=>x.id===clienteId);
+  const limite = c ? (c.limiteFiado || 0) : 0;
+  if(!c || limite <= 0){ callback(); return; }
+  const deudaFutura = (c.fiado||0) + montoNuevo;
+  if(deudaFutura > limite){
+    confirmarAccion(
+      `${c.nombre} debe ${money(c.fiado||0)}. Con este fiado de ${money(montoNuevo)} pasaría a deber ${money(deudaFutura)}, más que su límite de ${money(limite)}. ¿Fiarle igual?`,
+      callback, 'Sí, fiar igual'
+    );
+  } else {
+    callback();
+  }
+}
 
 function mostrarFormNuevoFiado(){
   abrirModal(`
@@ -3078,15 +3103,19 @@ function guardarNuevoFiado(){
   if(!monto || monto <= 0){ toast('Poné un monto válido', {icon:'✍️'}); return; }
   let clienteId = document.getElementById('nf-cliente').value;
   const nombreNuevo = document.getElementById('nf-nombre-nuevo').value.trim();
+  const detalle = document.getElementById('nf-detalle').value.trim() || 'Fiado';
   if(!clienteId && nombreNuevo){
-    const c = { id: uid(), nombre: nombreNuevo, telefono:'', fiado:0 };
+    const c = { id: uid(), nombre: nombreNuevo, telefono:'', limiteFiado:0, fiado:0 };
     state.clientes.push(c);
     clienteId = c.id;
   }
   if(!clienteId){ toast('Elegí o escribí un cliente', {icon:'👤'}); return; }
+  verificarLimiteFiado(clienteId, monto, () => aplicarNuevoFiado(clienteId, monto, detalle));
+}
+function aplicarNuevoFiado(clienteId, monto, detalle){
   const cliente = state.clientes.find(c=>c.id===clienteId);
   cliente.fiado = (cliente.fiado||0) + monto;
-  state.fiadoMovimientos.push({ id: uid(), clienteId, tipo:'debe', monto, fecha: Date.now(), detalle: document.getElementById('nf-detalle').value.trim() || 'Fiado' });
+  state.fiadoMovimientos.push({ id: uid(), clienteId, tipo:'debe', monto, fecha: Date.now(), detalle });
   guardar();
   cerrarModal();
   renderApp();
@@ -4324,6 +4353,8 @@ function mostrarFormCliente(id = null){
       <input id="cf-telefono" value="${c?c.telefono:''}" placeholder="WhatsApp (opcional)" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg mb-3" />
       <label class="font-semibold text-gray-600">Cumpleaños (opcional)</label>
       <input id="cf-cumpleanos" type="date" value="${c?(c.cumpleanos||''):''}" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2 mb-4" />
+      <label class="font-semibold text-gray-600">Límite de fiado (opcional)</label>
+      <input id="cf-limite" type="number" inputmode="decimal" value="${c&&c.limiteFiado?c.limiteFiado:''}" placeholder="Sin límite" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2 mb-4" />
       <button onclick="guardarCliente('${id||''}')" class="tap w-full bg-indigo-700 text-white font-bold py-4 rounded-2xl text-lg mb-2">Guardar</button>
       ${c ? `<button onclick="eliminarCliente('${id}')" class="tap w-full text-red-600 font-bold py-3">Eliminar cliente</button>` : ''}
     </div>
@@ -4333,11 +4364,12 @@ function guardarCliente(id){
   const nombre = document.getElementById('cf-nombre').value.trim();
   const telefono = document.getElementById('cf-telefono').value.trim();
   const cumpleanos = document.getElementById('cf-cumpleanos').value || '';
+  const limiteFiado = parseFloat(document.getElementById('cf-limite').value) || 0;
   if(!nombre){ toast('Escribí el nombre', {icon:'✍️'}); return; }
   if(id){
-    Object.assign(state.clientes.find(c=>c.id===id), { nombre, telefono, cumpleanos });
+    Object.assign(state.clientes.find(c=>c.id===id), { nombre, telefono, cumpleanos, limiteFiado });
   } else {
-    state.clientes.push({ id: uid(), nombre, telefono, cumpleanos, fiado: 0 });
+    state.clientes.push({ id: uid(), nombre, telefono, cumpleanos, limiteFiado, fiado: 0 });
   }
   guardar();
   cerrarModal();
