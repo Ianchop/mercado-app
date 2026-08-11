@@ -2433,9 +2433,9 @@ function normalizarTexto(s){
 let _codigoAVincular = '';
 let _callbackVincular = null;
 let _infoProductoEscaneado = null;
-async function buscarInfoCodigoBarras(codigo){
+async function buscarEnBaseDeProductos(dominio, codigo){
   try{
-    const resp = await fetch(`https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(codigo)}.json?fields=product_name,brands,image_front_small_url`);
+    const resp = await fetch(`https://${dominio}/api/v2/product/${encodeURIComponent(codigo)}.json?fields=product_name,brands,image_front_small_url`);
     if(!resp.ok) return null;
     const data = await resp.json();
     if(data.status !== 1 || !data.product || !data.product.product_name) return null;
@@ -2447,6 +2447,16 @@ async function buscarInfoCodigoBarras(codigo){
   }catch(e){
     return null; // sin internet, API caída, etc: seguimos con la búsqueda manual nomás
   }
+}
+async function buscarInfoCodigoBarras(codigo){
+  // Primero comida (Open Food Facts, la base más grande y completa).
+  // Si no está ahí, probamos con Open Products Facts, su proyecto hermano
+  // para todo lo que no es comida (librería, limpieza, etc). Tiene mucha
+  // menos data y casi nada en español, así que falla seguido, pero cuando
+  // tiene el producto cargado el resultado es igual de confiable.
+  const enComida = await buscarEnBaseDeProductos('world.openfoodfacts.org', codigo);
+  if(enComida) return enComida;
+  return await buscarEnBaseDeProductos('world.openproductsfacts.org', codigo);
 }
 async function mostrarVincularCodigoBarras(codigo, callback){
   _codigoAVincular = codigo;
