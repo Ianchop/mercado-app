@@ -3619,7 +3619,8 @@ function vistaCierre(){
   const transferenciaVentas = ventasHoy.filter(v=>v.metodoPago==='transferencia').reduce((s,v)=>s+v.total,0);
   const fiadoVentas = ventasHoy.filter(v=>v.metodoPago==='fiado').reduce((s,v)=>s+v.total,0);
   const pagosFiadoHoy = state.fiadoMovimientos.filter(m=>m.tipo==='pago' && m.fecha>=hoy).reduce((s,m)=>s+m.monto,0);
-  const efectivoEsperado = cierreFondoInicial + efectivoVentas + pagosFiadoHoy;
+  const gastosEfectivoHoy = state.gastos.filter(g=>g.fecha>=hoy && g.metodoPago==='efectivo').reduce((s,g)=>s+g.monto,0);
+  const efectivoEsperado = cierreFondoInicial + efectivoVentas + pagosFiadoHoy - gastosEfectivoHoy;
   const diferencia = cierreContado !== null ? cierreContado - efectivoEsperado : null;
 
   return `
@@ -3630,6 +3631,7 @@ function vistaCierre(){
       <div class="flex justify-between text-gray-700"><span>📲 Transferencias</span><span class="font-bold">${money(transferenciaVentas)}</span></div>
       <div class="flex justify-between text-gray-700"><span>📒 Ventas fiadas</span><span class="font-bold">${money(fiadoVentas)}</span></div>
       <div class="flex justify-between text-gray-700"><span>💰 Cobros de fiado</span><span class="font-bold">${money(pagosFiadoHoy)}</span></div>
+      ${gastosEfectivoHoy ? `<div class="flex justify-between text-red-600"><span>🧾 Gastos pagados en efectivo</span><span class="font-bold">-${money(gastosEfectivoHoy)}</span></div>` : ''}
     </div>
   </div>
 
@@ -3689,7 +3691,8 @@ function guardarCierre(){
   const ventasHoy = state.ventas.filter(v=>v.fecha>=hoy);
   const efectivoVentas = ventasHoy.filter(v=>v.metodoPago==='efectivo').reduce((s,v)=>s+v.total,0);
   const pagosFiadoHoy = state.fiadoMovimientos.filter(m=>m.tipo==='pago' && m.fecha>=hoy).reduce((s,m)=>s+m.monto,0);
-  const efectivoEsperado = cierreFondoInicial + efectivoVentas + pagosFiadoHoy;
+  const gastosEfectivoHoy = state.gastos.filter(g=>g.fecha>=hoy && g.metodoPago==='efectivo').reduce((s,g)=>s+g.monto,0);
+  const efectivoEsperado = cierreFondoInicial + efectivoVentas + pagosFiadoHoy - gastosEfectivoHoy;
   const diferencia = cierreContado - efectivoEsperado;
   state.cierres.push({ id: uid(), fecha: Date.now(), fondoInicial: cierreFondoInicial, esperado: efectivoEsperado, contado: cierreContado, diferencia });
   guardar();
@@ -3759,6 +3762,11 @@ function mostrarFormGasto(id = null){
       <input id="gf-descripcion" value="${g?g.descripcion:''}" placeholder="Ej: Factura de luz agosto" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2" />
       <label class="font-semibold text-gray-600">Monto</label>
       <input id="gf-monto" type="number" inputmode="decimal" value="${g?g.monto:''}" placeholder="0" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2" />
+      <label class="font-semibold text-gray-600">¿Cómo lo pagaste?</label>
+      <select id="gf-metodo" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2">
+        <option value="efectivo" ${!g||g.metodoPago==='efectivo'?'selected':''}>💵 Efectivo (sale de la caja)</option>
+        <option value="transferencia" ${g&&g.metodoPago==='transferencia'?'selected':''}>📲 Transferencia / otro medio</option>
+      </select>
       <label class="font-semibold text-gray-600">Fecha</label>
       <input id="gf-fecha" type="date" value="${fechaDefault}" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2 mb-4" />
       <button onclick="guardarGasto('${id||''}')" class="tap w-full bg-indigo-700 text-white font-bold py-4 rounded-2xl text-lg mb-2">Guardar</button>
@@ -3770,13 +3778,14 @@ function guardarGasto(id){
   const categoria = document.getElementById('gf-categoria').value;
   const descripcion = document.getElementById('gf-descripcion').value.trim();
   const monto = parseFloat(document.getElementById('gf-monto').value) || 0;
+  const metodoPago = document.getElementById('gf-metodo').value;
   const fechaStr = document.getElementById('gf-fecha').value;
   if(!monto || monto <= 0){ toast('Poné un monto válido', {icon:'✍️'}); return; }
   const fecha = fechaStr ? new Date(fechaStr + 'T12:00:00').getTime() : Date.now();
   if(id){
-    Object.assign(state.gastos.find(x=>x.id===id), { categoria, descripcion, monto, fecha });
+    Object.assign(state.gastos.find(x=>x.id===id), { categoria, descripcion, monto, metodoPago, fecha });
   } else {
-    state.gastos.push({ id: uid(), categoria, descripcion, monto, fecha });
+    state.gastos.push({ id: uid(), categoria, descripcion, monto, metodoPago, fecha });
   }
   guardar();
   cerrarModal();
