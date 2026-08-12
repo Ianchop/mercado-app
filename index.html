@@ -26,9 +26,6 @@
   import {
     getFirestore, doc, getDoc, getDocFromCache, setDoc, updateDoc, collection, getDocs, addDoc, onSnapshot, query, where, enableIndexedDbPersistence
   } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-firestore.js";
-  import {
-    getFunctions, httpsCallable
-  } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-functions.js";
 
   const firebaseConfig = {
     apiKey: "AIzaSyAR3EfaWSJ5vQp2OjjTPa3RKMruLD9EGcs",
@@ -42,7 +39,6 @@
   const fbApp = initializeApp(firebaseConfig);
   const fbAuth = getAuth(fbApp);
   const fbDb = getFirestore(fbApp);
-  const fbFunciones = getFunctions(fbApp);
   try { await enableIndexedDbPersistence(fbDb); } catch(e) { /* varias pestañas abiertas u navegador viejo: seguimos solo-online */ }
 
   window.fbOnCambioAuth = (callback) => onAuthStateChanged(fbAuth, callback);
@@ -122,20 +118,6 @@
     return onSnapshot(q, snap => callback(snap.docs.map(d => ({ id: d.id, ...d.data() }))), () => {});
   };
   window.fbActualizarPedido = (pedidoId, datos) => updateDoc(doc(fbDb, 'pedidosPublicos', pedidoId), datos);
-
-  // Cobro dinámico con MercadoPago: la Cloud Function usa el Access Token
-  // del negocio (guardado en su propio documento privado) para crear el
-  // cobro — el token nunca sale del backend ni pasa por acá.
-  window.fbCrearPreferenciaPago = async (datos) => {
-    const llamar = httpsCallable(fbFunciones, 'crearPreferenciaPago');
-    const resultado = await llamar(datos);
-    return resultado.data;
-  };
-  window.fbEscucharPagoMP = (idPago, callback) => {
-    return onSnapshot(doc(fbDb, 'pagosMercadoPago', idPago), snap => {
-      callback(snap.exists() ? snap.data() : null);
-    }, () => {});
-  };
 
   // Cuentas creadas por Google: además del login de Google, exigimos una
   // contraseña propia (linkWithCredential la agrega a la MISMA cuenta, no
@@ -2892,15 +2874,26 @@ function confirmarVenta(metodo, clienteId = null, precapturado = null){
   ], duracion: 7000 });
 }
 
-/* ---- Cobro dinámico con MercadoPago ---- */
-// Mapa (no una sola variable) porque puede haber más de un cobro
-// esperando pago al mismo tiempo: el cajero cierra la pantalla del QR de
-// un cliente lento y empieza a cobrarle a otro por MercadoPago también.
-const _pagosMPActivos = new Map(); // idPago -> función para dejar de escuchar
+/* ---- Cobro dinámico con MercadoPago ----
+   Sin backend: se llama directo a la API de MercadoPago desde el propio
+   navegador del comerciante, con SU access token (guardado en su
+   documento privado de Firestore, nunca en el HTML público — cada
+   negocio tiene el suyo). La API de MercadoPago acepta llamadas directas
+   desde el navegador (CORS abierto), así que no hace falta esconder el
+   token detrás de un servidor propio. Como no hay backend tampoco hay
+   webhook: en vez de que MercadoPago avise solo, se pregunta cada pocos
+   segundos "¿ya se pagó esto?" mientras el QR está en pantalla. */
+const MP_API = 'https://api.mercadopago.com';
+// Map (no una sola variable) porque puede haber más de un cobro esperando
+// pago al mismo tiempo: el cajero cierra la pantalla del QR de un cliente
+// lento y empieza a cobrarle a otro por MercadoPago también.
+const _pollsMPActivos = new Map(); // idPago -> intervalId
 async function cobrarConMercadoPago(total){
   const items = Object.entries(carrito).filter(([,c])=>c>0).map(([id,c])=>({ productoId:id, cantidad:c }));
   const combosVendidos = Object.entries(carritoCombos).filter(([,c])=>c>0).map(([id,c])=>({ comboId:id, cantidad:c }));
   if(!items.length && !combosVendidos.length) return;
+  const token = state.negocio.mercadoPagoAccessToken;
+  if(!token){ toast('Todavía no cargaste tu Access Token de MercadoPago en Configuración', {icon:'⚠️', duracion:4500}); return; }
   const idPago = uid();
   abrirModal(`
     <div class="p-5 text-center">
@@ -2913,9 +2906,18 @@ async function cobrarConMercadoPago(total){
     </div>
   `);
   refrescarIconos();
-  let resultado;
+  let pref;
   try{
-    resultado = await conTimeout(window.fbCrearPreferenciaPago({ monto: total, descripcion: `Venta ${state.negocio.nombre}`, idPago }), 15000);
+    const resp = await conTimeout(fetch(`${MP_API}/checkout/preferences`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        items: [{ title: `Venta ${state.negocio.nombre}`, quantity: 1, unit_price: total, currency_id: 'ARS' }],
+        external_reference: idPago
+      })
+    }), 15000);
+    pref = await resp.json();
+    if(!resp.ok) throw new Error(pref.message || 'MercadoPago rechazó la solicitud. Revisá que el Access Token sea válido.');
   }catch(e){
     const el = document.getElementById('mp-estado');
     if(el && el.dataset.idPago === idPago){
@@ -2923,8 +2925,8 @@ async function cobrarConMercadoPago(total){
     }
     return;
   }
-  mostrarQrPagoMP(idPago, resultado.initPoint, total);
-  escucharPagoMP(idPago, items, combosVendidos, total);
+  mostrarQrPagoMP(idPago, pref.init_point, total);
+  iniciarPollingPagoMP(idPago, items, combosVendidos, token);
 }
 function mostrarQrPagoMP(idPago, link, total){
   const el = document.getElementById('mp-estado');
@@ -2943,22 +2945,36 @@ function mostrarQrPagoMP(idPago, link, total){
   `;
   refrescarIconos();
 }
-function escucharPagoMP(idPago, items, combosVendidos, total){
-  const unsub = window.fbEscucharPagoMP(idPago, (pago) => {
-    if(!pago || pago.estado === 'pendiente') return;
-    const dejarDeEscuchar = _pagosMPActivos.get(idPago);
-    if(dejarDeEscuchar) dejarDeEscuchar();
-    _pagosMPActivos.delete(idPago);
+function iniciarPollingPagoMP(idPago, items, combosVendidos, token){
+  const intervalId = setInterval(async () => {
+    let data;
+    try{
+      const resp = await fetch(`${MP_API}/v1/payments/search?external_reference=${encodeURIComponent(idPago)}&sort=date_created&criteria=desc`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if(!resp.ok) return; // sigue intentando en el próximo ciclo
+      data = await resp.json();
+    }catch(e){ return; }
+    const resultados = (data && data.results) || [];
+    const aprobado = resultados.find(p => p.status === 'approved');
+    const rechazado = resultados.find(p => p.status === 'rejected' || p.status === 'cancelled');
+    if(!aprobado && !rechazado) return;
+    detenerPollingPagoMP(idPago);
     const el = document.getElementById('mp-estado');
     const pantallaVisible = el && el.dataset.idPago === idPago;
-    if(pago.estado === 'aprobado'){
+    if(aprobado){
       if(pantallaVisible) cerrarModal();
       confirmarVenta('mercadopago', null, { items, combos: combosVendidos });
     } else if(pantallaVisible){
       el.innerHTML = `<div class="text-red-600 font-bold">El pago fue rechazado o cancelado.</div>`;
     }
-  });
-  _pagosMPActivos.set(idPago, unsub);
+  }, 3000);
+  _pollsMPActivos.set(idPago, intervalId);
+}
+function detenerPollingPagoMP(idPago){
+  const intervalId = _pollsMPActivos.get(idPago);
+  if(intervalId) clearInterval(intervalId);
+  _pollsMPActivos.delete(idPago);
 }
 
 function revertirVenta(venta){
@@ -4839,6 +4855,7 @@ function vistaConfig(){
     <input id="cfg-mp-token" type="password" value="${state.negocio.mercadoPagoAccessToken||''}" placeholder="APP_USR-..." class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2 mb-3" />
     <button onclick="guardarAccessTokenMP()" class="tap w-full bg-white border-2 border-gray-200 text-gray-700 font-bold py-3 rounded-2xl">${state.negocio.mercadoPagoAccessToken?'Actualizar token':'Guardar token'}</button>
     ${state.negocio.mercadoPagoAccessToken ? `<div class="text-emerald-600 text-sm font-semibold mt-2 text-center">✅ Configurado — ya aparece la opción en la Caja</div>` : ''}
+    <div class="text-gray-400 text-xs mt-3">Este token solo se guarda en tu cuenta (nadie más lo puede ver) y se usa directo desde tu celular/compu para hablar con MercadoPago, sin pasar por ningún servidor intermedio. Ojo: si en algún momento entrás a las herramientas de desarrollador de tu propio navegador, ahí sí se podría ver — como con cualquier dato tuyo que la app maneja.</div>
   </div>
 
   <div class="card p-4 mb-4">
