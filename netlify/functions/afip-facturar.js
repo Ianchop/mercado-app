@@ -230,24 +230,35 @@ function armarQR({ cuit, ptoVta, cbteTipo, cbteNro, importe, fecha, cae }) {
   return `https://www.afip.gob.ar/fe/qr/?p=${b64}`;
 }
 
+// La app (index.html) vive en un dominio distinto al de esta función
+// (Netlify aparte), así que el navegador exige CORS: cabeceras en TODAS
+// las respuestas (también las de error) y responder el preflight OPTIONS
+// que el navegador manda solo antes del POST real.
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization'
+};
+
 exports.handler = async (event) => {
-  if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method not allowed' };
+  if (event.httpMethod === 'OPTIONS') return { statusCode: 204, headers: CORS_HEADERS, body: '' };
+  if (event.httpMethod !== 'POST') return { statusCode: 405, headers: CORS_HEADERS, body: 'Method not allowed' };
   try {
     const authHeader = event.headers.authorization || event.headers.Authorization || '';
     const idToken = authHeader.replace(/^Bearer\s+/i, '');
-    if (!idToken) return { statusCode: 401, body: JSON.stringify({ error: 'Falta autenticación' }) };
+    if (!idToken) return { statusCode: 401, headers: CORS_HEADERS, body: JSON.stringify({ error: 'Falta autenticación' }) };
     const decoded = await authAdmin.verifyIdToken(idToken);
     const uid = decoded.uid;
 
     const body = JSON.parse(event.body || '{}');
     const importe = Number(body.importe);
-    if (!importe || importe <= 0) return { statusCode: 400, body: JSON.stringify({ error: 'Importe inválido' }) };
+    if (!importe || importe <= 0) return { statusCode: 400, headers: CORS_HEADERS, body: JSON.stringify({ error: 'Importe inválido' }) };
 
     const negocioSnap = await db.collection('negocios').doc(uid).get();
     const negocio = negocioSnap.exists ? negocioSnap.data().negocio : null;
     const afipCfg = negocio && negocio.afip;
     if (!afipCfg || !afipCfg.certificado || !afipCfg.clavePrivada || !afipCfg.cuit || !afipCfg.puntoVenta) {
-      return { statusCode: 400, body: JSON.stringify({ error: 'Este negocio todavía no configuró su facturación de AFIP' }) };
+      return { statusCode: 400, headers: CORS_HEADERS, body: JSON.stringify({ error: 'Este negocio todavía no configuró su facturación de AFIP' }) };
     }
     const homologacion = afipCfg.modo !== 'produccion'; // homologación por default: hay que elegir producción a propósito
     const cbteTipo = 11; // Factura C (monotributista) — única soportada por ahora
@@ -264,6 +275,7 @@ exports.handler = async (event) => {
 
     return {
       statusCode: 200,
+      headers: CORS_HEADERS,
       body: JSON.stringify({
         cae: resultado.cae,
         caeVencimiento: resultado.caeVencimiento,
@@ -275,6 +287,6 @@ exports.handler = async (event) => {
       })
     };
   } catch (e) {
-    return { statusCode: 500, body: JSON.stringify({ error: String((e && e.message) || e) }) };
+    return { statusCode: 500, headers: CORS_HEADERS, body: JSON.stringify({ error: String((e && e.message) || e) }) };
   }
 };

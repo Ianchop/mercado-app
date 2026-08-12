@@ -2997,11 +2997,16 @@ function detenerPollingPagoMP(idPago){
    y la clave privada del negocio viven en su documento privado de
    Firestore; el servidor los lee de ahí, nunca los ve el navegador del
    cliente que compra. */
+// URL completa (no relativa): el sitio de la app y el backend de AFIP
+// viven en dominios distintos (la app puede estar en GitHub Pages o
+// donde sea; el backend está en Netlify aparte), así que una ruta
+// relativa apuntaría al lugar equivocado.
+const AFIP_FUNCION_URL = 'https://mercado-app-afip.netlify.app/.netlify/functions/afip-facturar';
 async function facturarVentaAfip(venta){
   toast('Generando factura AFIP...', { icon:'🧾', duracion:3000 });
   try{
     const idToken = await usuarioFirebase.getIdToken();
-    const resp = await conTimeout(fetch('/.netlify/functions/afip-facturar', {
+    const resp = await conTimeout(fetch(AFIP_FUNCION_URL, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${idToken}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ importe: venta.total })
