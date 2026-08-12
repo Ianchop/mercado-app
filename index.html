@@ -2706,6 +2706,12 @@ function abrirModalCobrar(){
       <div class="flex items-center justify-between text-2xl font-extrabold border-t pt-4 mb-5">
         <span>Total</span><span class="text-green-600">${money(total)}</span>
       </div>
+      ${state.negocio.afip?.certificado ? `
+      <label class="flex items-center gap-2 mb-4 cursor-pointer">
+        <input type="checkbox" id="cobrar-facturar" ${facturarProximaVenta?'checked':''} onchange="facturarProximaVenta=this.checked" class="w-5 h-5" />
+        <span class="font-semibold text-gray-700">🧾 Facturar esta venta (AFIP)${state.negocio.afip.modo!=='produccion'?' — modo prueba':''}</span>
+      </label>
+      ` : ''}
       <div class="text-gray-600 font-semibold mb-2">¿Cómo paga?</div>
       <div class="grid ${state.negocio.mercadoPagoAccessToken ? 'grid-cols-2' : 'grid-cols-3'} gap-2 mb-2">
         <button onclick="mostrarVueltoParaVenta(${total})" class="tap card py-4 flex flex-col items-center gap-1 border-2 border-transparent"><span class="text-2xl">💵</span><span class="text-sm font-bold">Efectivo</span></button>
@@ -2821,16 +2827,19 @@ function crearClienteYFiar(){
 }
 
 let ultimaVentaId = null;
+let facturarProximaVenta = false; // casillero "Facturar esta venta (AFIP)" del checkout
 // "precapturado" es solo para el cobro con MercadoPago: como el pago se
 // confirma en segundo plano (puede tardar), no hay que esperar a último
 // momento a leer el carrito EN VIVO — para entonces el cajero puede haber
 // vaciado el carrito o estar cobrándole a otro cliente. Se congelan los
 // items al generar el QR y se venden esos, pase lo que pase con el
-// carrito mientras tanto.
+// carrito mientras tanto. Lo mismo con "facturar": se congela si estaba
+// tildado en ese momento, no el estado actual del casillero.
 function confirmarVenta(metodo, clienteId = null, precapturado = null){
   const items = precapturado ? precapturado.items : Object.entries(carrito).filter(([,c])=>c>0).map(([id,c])=>({ productoId:id, cantidad:c }));
   const combosVendidos = precapturado ? precapturado.combos : Object.entries(carritoCombos).filter(([,c])=>c>0).map(([id,c])=>({ comboId:id, cantidad:c }));
   if(!items.length && !combosVendidos.length) return;
+  const debeFacturar = precapturado ? !!precapturado.facturar : facturarProximaVenta;
   let total = 0, ganancia = 0;
   items.forEach(it => {
     const p = state.productos.find(x=>x.id===it.productoId);
@@ -2864,6 +2873,7 @@ function confirmarVenta(metodo, clienteId = null, precapturado = null){
   if(!precapturado){
     carrito = {};
     carritoCombos = {};
+    facturarProximaVenta = false;
     cerrarModal();
     ir('#/inicio');
   }
@@ -2872,6 +2882,7 @@ function confirmarVenta(metodo, clienteId = null, precapturado = null){
     { fn:'deshacerVenta()', texto:'Deshacer' },
     { fn:`imprimirComprobante('${venta.id}')`, texto:'🖨️ Imprimir' }
   ], duracion: 7000 });
+  if(debeFacturar) facturarVentaAfip(venta);
 }
 
 /* ---- Cobro dinámico con MercadoPago ----
@@ -2894,6 +2905,7 @@ async function cobrarConMercadoPago(total){
   if(!items.length && !combosVendidos.length) return;
   const token = state.negocio.mercadoPagoAccessToken;
   if(!token){ toast('Todavía no cargaste tu Access Token de MercadoPago en Configuración', {icon:'⚠️', duracion:4500}); return; }
+  const facturar = facturarProximaVenta; // congelado acá, no en el momento en que se apruebe el pago
   const idPago = uid();
   abrirModal(`
     <div class="p-5 text-center">
@@ -2926,7 +2938,7 @@ async function cobrarConMercadoPago(total){
     return;
   }
   mostrarQrPagoMP(idPago, pref.init_point, total);
-  iniciarPollingPagoMP(idPago, items, combosVendidos, token);
+  iniciarPollingPagoMP(idPago, items, combosVendidos, token, facturar);
 }
 function mostrarQrPagoMP(idPago, link, total){
   const el = document.getElementById('mp-estado');
@@ -2945,7 +2957,7 @@ function mostrarQrPagoMP(idPago, link, total){
   `;
   refrescarIconos();
 }
-function iniciarPollingPagoMP(idPago, items, combosVendidos, token){
+function iniciarPollingPagoMP(idPago, items, combosVendidos, token, facturar){
   const intervalId = setInterval(async () => {
     let data;
     try{
@@ -2964,7 +2976,7 @@ function iniciarPollingPagoMP(idPago, items, combosVendidos, token){
     const pantallaVisible = el && el.dataset.idPago === idPago;
     if(aprobado){
       if(pantallaVisible) cerrarModal();
-      confirmarVenta('mercadopago', null, { items, combos: combosVendidos });
+      confirmarVenta('mercadopago', null, { items, combos: combosVendidos, facturar });
     } else if(pantallaVisible){
       el.innerHTML = `<div class="text-red-600 font-bold">El pago fue rechazado o cancelado.</div>`;
     }
@@ -2975,6 +2987,50 @@ function detenerPollingPagoMP(idPago){
   const intervalId = _pollsMPActivos.get(idPago);
   if(intervalId) clearInterval(intervalId);
   _pollsMPActivos.delete(idPago);
+}
+
+/* ---- Facturación electrónica AFIP ----
+   A diferencia de MercadoPago, la API de AFIP no se puede llamar directo
+   desde el navegador (no tiene CORS habilitado — se probó a mano), así
+   que esto sí necesita un servidor intermedio propio (Netlify, no
+   Firebase, para no depender de una tarjeta de crédito). El certificado
+   y la clave privada del negocio viven en su documento privado de
+   Firestore; el servidor los lee de ahí, nunca los ve el navegador del
+   cliente que compra. */
+async function facturarVentaAfip(venta){
+  toast('Generando factura AFIP...', { icon:'🧾', duracion:3000 });
+  try{
+    const idToken = await usuarioFirebase.getIdToken();
+    const resp = await conTimeout(fetch('/.netlify/functions/afip-facturar', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ importe: venta.total })
+    }), 20000);
+    const datos = await resp.json();
+    if(!resp.ok) throw new Error(datos.error || 'Error al facturar');
+    venta.facturaAfip = datos;
+    guardar();
+    mostrarFacturaGenerada(datos);
+  }catch(e){
+    toast('No se pudo facturar: ' + ((e && e.message) || ''), { icon:'⚠️', duracion:6000 });
+  }
+}
+function mostrarFacturaGenerada(datos){
+  const qr = qrcode(0, 'M');
+  qr.addData(datos.qrUrl);
+  qr.make();
+  abrirModal(`
+    <div class="p-5 text-center">
+      <div class="text-xl font-extrabold text-gray-900 mb-1">${datos.homologacion ? '🧪 Factura de prueba' : '🧾 Factura emitida'}</div>
+      ${datos.homologacion ? `<div class="text-amber-600 text-sm font-semibold mb-3">Modo prueba (homologación): no es válida fiscalmente</div>` : ''}
+      <div class="text-gray-500 text-sm mb-3">${datos.tipoComprobante} ${String(datos.puntoVenta).padStart(4,'0')}-${String(datos.numeroComprobante).padStart(8,'0')}</div>
+      <img src="${qr.createDataURL(6,8)}" style="width:180px;height:180px;" class="mx-auto mb-3 rounded-xl" alt="QR AFIP" />
+      <div class="text-gray-700 text-sm mb-1">CAE: <span class="font-bold">${datos.cae}</span></div>
+      <div class="text-gray-400 text-xs mb-4">Vence: ${datos.caeVencimiento}</div>
+      <button onclick="cerrarModal()" class="tap w-full bg-indigo-700 text-white font-bold py-3.5 rounded-2xl">Listo</button>
+    </div>
+  `);
+  refrescarIconos();
 }
 
 function revertirVenta(venta){
@@ -4750,15 +4806,25 @@ function imprimirComprobante(id){
     return { nombre: c ? `${c.nombre} (combo)` : '(combo eliminado)', cantidad: cv.cantidad, precio: c ? c.precio : 0 };
   });
   const todosLosItems = [...items, ...combos];
+  const f = venta.facturaAfip;
+  let qrImgTag = '';
+  if(f){
+    const qr = qrcode(0, 'M');
+    qr.addData(f.qrUrl);
+    qr.make();
+    qrImgTag = `<div style="text-align:center; margin-top:12px;"><img src="${qr.createDataURL(4,4)}" style="width:120px;height:120px;" /></div>`;
+  }
   document.getElementById('area-impresion').innerHTML = `
     <div style="font-family: monospace; padding: 16px; width: 280px;">
       <h2 style="text-align:center; margin-bottom:0;">${state.negocio.nombre}</h2>
       <p style="text-align:center; margin-top:4px;">${fechaHora(venta.fecha)}</p>
+      ${f ? `<p style="text-align:center; margin:4px 0;">${f.tipoComprobante} ${String(f.puntoVenta).padStart(4,'0')}-${String(f.numeroComprobante).padStart(8,'0')}${f.homologacion?' (PRUEBA)':''}</p>` : ''}
       <hr>
       ${todosLosItems.map(it => `<div style="display:flex; justify-content:space-between;"><span>${it.cantidad}x ${it.nombre}</span><span>${money(it.precio*it.cantidad)}</span></div>`).join('')}
       <hr>
       <div style="display:flex; justify-content:space-between; font-weight:bold; font-size:16px;"><span>TOTAL</span><span>${money(venta.total)}</span></div>
       <p style="text-align:center;">${iconoMetodo(venta.metodoPago)} ${venta.metodoPago}</p>
+      ${f ? `<p style="text-align:center; font-size:11px; margin-top:8px;">CAE: ${f.cae}<br>Vto: ${f.caeVencimiento}</p>${qrImgTag}` : ''}
       <p style="text-align:center; margin-top:20px;">¡Gracias por su compra!</p>
     </div>
   `;
@@ -4859,6 +4925,29 @@ function vistaConfig(){
   </div>
 
   <div class="card p-4 mb-4">
+    <div class="font-bold text-gray-700 mb-1 text-lg">🧾 Facturación electrónica (AFIP)</div>
+    <div class="text-gray-500 text-sm mb-3">Por ahora solo Factura C (monotributista) a Consumidor Final. Necesitás tener el certificado digital dado de alta en AFIP: Clave Fiscal → Administrador de Relaciones de Clave Fiscal → adherir el servicio "Facturación Electrónica" → generar el certificado ahí mismo.</div>
+    <label class="font-semibold text-gray-600 text-sm">CUIT (sin guiones)</label>
+    <input id="cfg-afip-cuit" value="${state.negocio.afip?.cuit||''}" placeholder="20111111112" inputmode="numeric" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2 mb-3" />
+    <label class="font-semibold text-gray-600 text-sm">Punto de venta</label>
+    <input id="cfg-afip-ptovta" type="number" value="${state.negocio.afip?.puntoVenta||''}" placeholder="Ej: 3" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2 mb-3" />
+    <label class="font-semibold text-gray-600 text-sm">Certificado (contenido del .crt)</label>
+    <textarea id="cfg-afip-cert" rows="3" placeholder="-----BEGIN CERTIFICATE-----..." class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-sm my-2 mb-3" style="font-family:monospace;">${state.negocio.afip?.certificado||''}</textarea>
+    <label class="font-semibold text-gray-600 text-sm">Clave privada (contenido del .key)</label>
+    <textarea id="cfg-afip-key" rows="3" placeholder="-----BEGIN PRIVATE KEY-----..." class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-sm my-2 mb-3" style="font-family:monospace;">${state.negocio.afip?.clavePrivada||''}</textarea>
+    <label class="font-semibold text-gray-600 text-sm">Modo</label>
+    <div class="grid grid-cols-2 gap-2 mt-1 mb-2">
+      <button onclick="cambiarModoAfip('homologacion')" class="tap py-3 rounded-2xl font-bold border-2 ${(state.negocio.afip?.modo||'homologacion')==='homologacion'?'bg-amber-500 text-white border-amber-500':'bg-white text-gray-600 border-gray-200'}">🧪 Prueba</button>
+      <button onclick="cambiarModoAfip('produccion')" class="tap py-3 rounded-2xl font-bold border-2 ${state.negocio.afip?.modo==='produccion'?'bg-red-600 text-white border-red-600':'bg-white text-gray-600 border-gray-200'}">🔴 Producción</button>
+    </div>
+    ${state.negocio.afip?.modo==='produccion'
+      ? `<div class="text-red-600 text-xs font-semibold mb-3">⚠️ Estás en producción: las facturas que generes de acá en más son reales y válidas ante AFIP.</div>`
+      : `<div class="text-amber-600 text-xs font-semibold mb-3">Estás en modo prueba: las facturas NO son válidas fiscalmente todavía. Probá que ande bien acá antes de pasar a producción.</div>`}
+    <button onclick="guardarConfigAfip()" class="tap w-full bg-white border-2 border-gray-200 text-gray-700 font-bold py-3 rounded-2xl">Guardar</button>
+    ${state.negocio.afip?.certificado ? `<div class="text-emerald-600 text-sm font-semibold mt-2 text-center">✅ Configurado — ya aparece la opción en la Caja</div>` : ''}
+  </div>
+
+  <div class="card p-4 mb-4">
     <div class="font-bold text-gray-700 mb-1 text-lg">🔐 Tu cuenta</div>
     <div class="text-gray-500 text-sm mb-3">${usuarioFirebase ? usuarioFirebase.email : ''}</div>
     <button onclick="cerrarSesionApp()" class="tap w-full bg-white border-2 border-gray-200 text-gray-700 font-bold py-3.5 rounded-2xl">Cerrar sesión</button>
@@ -4927,6 +5016,29 @@ function guardarCatalogoPublicoImagenes(){
 }
 function guardarAccessTokenMP(){
   state.negocio.mercadoPagoAccessToken = document.getElementById('cfg-mp-token').value.trim();
+  guardar();
+  renderApp();
+  toast('Guardado', {icon:'✅'});
+}
+function cambiarModoAfip(modo){
+  if(!state.negocio.afip) state.negocio.afip = {};
+  if(modo === 'produccion' && state.negocio.afip.modo !== 'produccion'){
+    confirmarAccion('¿Pasar a modo PRODUCCIÓN? Las facturas que generes de acá en más van a ser reales y válidas ante AFIP. Asegurate de haber probado bien en modo Prueba primero.', () => {
+      state.negocio.afip.modo = 'produccion';
+      renderApp();
+    }, 'Sí, pasar a producción');
+  } else {
+    state.negocio.afip.modo = modo;
+    renderApp();
+  }
+}
+function guardarConfigAfip(){
+  if(!state.negocio.afip) state.negocio.afip = {};
+  state.negocio.afip.cuit = document.getElementById('cfg-afip-cuit').value.trim();
+  state.negocio.afip.puntoVenta = parseInt(document.getElementById('cfg-afip-ptovta').value) || 0;
+  state.negocio.afip.certificado = document.getElementById('cfg-afip-cert').value.trim();
+  state.negocio.afip.clavePrivada = document.getElementById('cfg-afip-key').value.trim();
+  if(!state.negocio.afip.modo) state.negocio.afip.modo = 'homologacion';
   guardar();
   renderApp();
   toast('Guardado', {icon:'✅'});
