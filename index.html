@@ -13,6 +13,7 @@
 <script src="https://unpkg.com/lucide@latest"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/node-forge@1.3.1/dist/forge.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script type="module">
   // Firebase: cuentas reales (email/contraseña + Google) y datos en la nube.
   // Se importa como módulo ES directo desde el CDN de Google: cero instalación,
@@ -1584,6 +1585,172 @@ function confirmarImportarCatalogo(){
   cerrarModal();
   renderApp();
   toast(`Se importaron ${agregados} productos`, { icon:'✅', duracion:4500 });
+}
+
+/* ====================== IMPORTAR PRODUCTOS DESDE EXCEL ======================
+   Todo pasa en el navegador (con la librería SheetJS): el archivo nunca se
+   sube a ningún servidor. Se detectan las columnas automáticamente por el
+   título de cada una, pero siempre se le muestra el resultado al dueño para
+   que lo confirme o lo corrija antes de importar nada. */
+const CAMPOS_IMPORTAR_EXCEL = [
+  { campo:'nombre', label:'Nombre del producto', obligatorio:true, palabras:['nombre','producto','articulo','descripcion','item','detalle'] },
+  { campo:'precio', label:'Precio de venta', obligatorio:false, palabras:['precio','pventa','preciodeventa','venta','pvp'] },
+  { campo:'costo', label:'Precio de costo', obligatorio:false, palabras:['costo','pcosto','preciodecosto','compra'] },
+  { campo:'stock', label:'Stock / cantidad', obligatorio:false, palabras:['stock','cantidad','existencia','existencias'] },
+  { campo:'stockMin', label:'Stock mínimo', obligatorio:false, palabras:['stockminimo','minimo','stockmin'] },
+  { campo:'marca', label:'Marca', obligatorio:false, palabras:['marca'] },
+  { campo:'categoria', label:'Categoría', obligatorio:false, palabras:['categoria','rubro','tipo'] },
+  { campo:'codigoBarras', label:'Código de barras', obligatorio:false, palabras:['codigobarras','codigo','ean','barcode'] },
+];
+let _excelDatos = null;   // { headers:[...], filas:[[...], ...] }
+let _excelMapeo = {};     // { nombre: colIndex|null, precio: colIndex|null, ... }
+
+function mostrarImportarExcel(){
+  abrirModal(`
+    <div class="p-5">
+      <div class="text-xl font-extrabold text-gray-900 mb-1">Importar productos desde Excel</div>
+      <div class="text-gray-500 text-sm mb-4">
+        Subí un archivo Excel (.xlsx) o CSV con tus productos. La primera fila tiene que tener los títulos de las columnas (por ejemplo: Nombre, Precio, Costo, Stock). El archivo no se sube a ningún lado, se procesa acá mismo en tu celular o computadora.
+      </div>
+      <input id="excel-input" type="file" accept=".xlsx,.xls,.csv" class="w-full border-2 border-dashed border-gray-200 rounded-2xl p-4 text-center" onchange="procesarArchivoExcel(this)" />
+      <div id="excel-estado" class="text-red-600 font-semibold text-sm mt-3 text-center"></div>
+      <button onclick="cerrarModal()" class="tap w-full text-gray-400 font-semibold py-3 mt-2">Cancelar</button>
+    </div>
+  `);
+}
+function procesarArchivoExcel(input){
+  const file = input.files[0];
+  if(!file) return;
+  const estado = document.getElementById('excel-estado');
+  estado.className = 'text-gray-400 font-semibold text-sm mt-3 text-center';
+  estado.textContent = 'Leyendo archivo...';
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try{
+      const wb = XLSX.read(e.target.result, { type:'array' });
+      const hoja = wb.Sheets[wb.SheetNames[0]];
+      const filasCrudas = XLSX.utils.sheet_to_json(hoja, { header:1, raw:true, defval:'' });
+      if(!filasCrudas.length){ estado.className = 'text-red-600 font-semibold text-sm mt-3 text-center'; estado.textContent = 'El archivo está vacío.'; return; }
+      const headers = filasCrudas[0].map(h => String(h||'').trim());
+      const filas = filasCrudas.slice(1).filter(f => f.some(c => String(c||'').trim() !== ''));
+      if(!filas.length){ estado.className = 'text-red-600 font-semibold text-sm mt-3 text-center'; estado.textContent = 'No encontramos filas con datos debajo de los títulos.'; return; }
+      _excelDatos = { headers, filas };
+      _excelMapeo = autoDetectarMapeoExcel(headers);
+      mostrarMapeoImportarExcel();
+    }catch(err){
+      estado.className = 'text-red-600 font-semibold text-sm mt-3 text-center';
+      estado.textContent = 'No pudimos leer ese archivo. Probá exportarlo como .xlsx o .csv desde Excel o Google Sheets.';
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+function autoDetectarMapeoExcel(headers){
+  const normalizados = headers.map(h => normalizarTexto(h).replace(/[^a-z0-9]/g,''));
+  const mapeo = {};
+  const usadas = new Set();
+  CAMPOS_IMPORTAR_EXCEL.forEach(({campo, palabras}) => {
+    const idx = normalizados.findIndex((h, i) => !usadas.has(i) && h && palabras.some(p => h === p || h.includes(p)));
+    mapeo[campo] = idx === -1 ? null : idx;
+    if(idx !== -1) usadas.add(idx);
+  });
+  return mapeo;
+}
+function mostrarMapeoImportarExcel(){
+  const { headers, filas } = _excelDatos;
+  const opcionesColumna = (campo) => `
+    <option value="">-- No importar --</option>
+    ${headers.map((h,i) => `<option value="${i}" ${_excelMapeo[campo]===i?'selected':''}>${h || ('Columna '+(i+1))}</option>`).join('')}
+  `;
+  const colNombre = _excelMapeo.nombre;
+  const filasValidas = (colNombre===null || colNombre===undefined) ? [] : filas.filter(f => String(f[colNombre]||'').trim() !== '');
+  abrirModal(`
+    <div class="p-5">
+      <div class="text-xl font-extrabold text-gray-900 mb-1">Confirmá las columnas</div>
+      <div class="text-gray-500 text-sm mb-4">Encontramos ${headers.length} columnas y ${filas.length} filas. Revisá que cada campo esté emparejado con la columna correcta de tu Excel.</div>
+      <div class="flex flex-col gap-3 mb-4">
+        ${CAMPOS_IMPORTAR_EXCEL.map(({campo,label,obligatorio}) => `
+          <div>
+            <label class="font-semibold text-gray-600 text-sm">${label}${obligatorio?' *':''}</label>
+            <select onchange="cambiarMapeoColumnaExcel('${campo}', this.value)" class="w-full border-2 border-gray-200 rounded-xl px-3 py-2.5 mt-1 text-base">
+              ${opcionesColumna(campo)}
+            </select>
+          </div>
+        `).join('')}
+      </div>
+      ${(colNombre===null || colNombre===undefined) ? `<div class="text-red-600 font-semibold text-sm mb-3">Elegí qué columna tiene el nombre del producto para poder importar.</div>` : ''}
+      <button onclick="confirmarImportarExcel()" class="tap w-full bg-indigo-700 text-white font-bold py-4 rounded-2xl text-lg mb-2" ${filasValidas.length===0?'disabled':''}>
+        ${filasValidas.length===0 ? 'Elegí la columna de nombre' : `Importar ${filasValidas.length} producto${filasValidas.length===1?'':'s'}`}
+      </button>
+      <button onclick="cerrarModal()" class="tap w-full text-gray-400 font-semibold py-3">Cancelar</button>
+    </div>
+  `);
+}
+function cambiarMapeoColumnaExcel(campo, valor){
+  _excelMapeo[campo] = valor === '' ? null : parseInt(valor);
+  mostrarMapeoImportarExcel();
+}
+// Las planillas argentinas suelen usar "," como separador decimal y "." para
+// miles (ej: "1.500,50"); esto los soporta a los dos sin romper números que
+// ya vienen como number desde SheetJS.
+function parseNumeroExcel(valor){
+  if(valor === '' || valor === null || valor === undefined) return 0;
+  if(typeof valor === 'number') return valor;
+  let s = String(valor).trim().replace(/[^\d,.-]/g,'');
+  if(s.includes(',') && s.includes('.')){
+    if(s.lastIndexOf(',') > s.lastIndexOf('.')) s = s.replace(/\./g,'').replace(',','.');
+    else s = s.replace(/,/g,'');
+  } else if(s.includes(',')){
+    s = s.replace(',','.');
+  } else if(/^\d{1,3}(\.\d{3})+$/.test(s)){
+    // Solo puntos, en grupos de 3 dígitos (ej "1.000", "12.500"): es
+    // separador de miles estilo argentino, no un punto decimal.
+    s = s.replace(/\./g,'');
+  }
+  const n = parseFloat(s);
+  return isNaN(n) ? 0 : n;
+}
+function confirmarImportarExcel(){
+  const { filas } = _excelDatos;
+  const m = _excelMapeo;
+  if(m.nombre === null || m.nombre === undefined){ toast('Elegí la columna de nombre', {icon:'✍️'}); return; }
+  const categoriasActuales = new Map(state.categorias.map(c => [normalizarTexto(c.nombre), c.id]));
+  let agregados = 0;
+  filas.forEach(fila => {
+    const nombre = String(fila[m.nombre] || '').trim();
+    if(!nombre) return;
+    let categoriaId = '';
+    if(m.categoria !== null && m.categoria !== undefined){
+      const nombreCat = String(fila[m.categoria] || '').trim();
+      if(nombreCat){
+        const clave = normalizarTexto(nombreCat);
+        if(categoriasActuales.has(clave)){
+          categoriaId = categoriasActuales.get(clave);
+        } else {
+          categoriaId = uid();
+          state.categorias.push({ id: categoriaId, nombre: nombreCat });
+          categoriasActuales.set(clave, categoriaId);
+        }
+      }
+    }
+    state.productos.push({
+      id: uid(), nombre,
+      marca: (m.marca !== null && m.marca !== undefined) ? String(fila[m.marca]||'').trim() : '',
+      contenidoCantidad: 1, contenidoUnidad: 'unidades',
+      categoriaId, proveedorId: '',
+      codigoBarras: (m.codigoBarras !== null && m.codigoBarras !== undefined) ? String(fila[m.codigoBarras]||'').trim() : '',
+      precio: (m.precio !== null && m.precio !== undefined) ? parseNumeroExcel(fila[m.precio]) : 0,
+      costo: (m.costo !== null && m.costo !== undefined) ? parseNumeroExcel(fila[m.costo]) : 0,
+      stock: (m.stock !== null && m.stock !== undefined) ? Math.round(parseNumeroExcel(fila[m.stock])) : 0,
+      stockMin: (m.stockMin !== null && m.stockMin !== undefined) ? Math.round(parseNumeroExcel(fila[m.stockMin])) : 3,
+      vencimiento: '', temporada: '', emoji: '📦', imagen: ''
+    });
+    agregados++;
+  });
+  guardar();
+  cerrarModal();
+  renderApp();
+  toast(`Se importaron ${agregados} producto${agregados===1?'':'s'}`, { icon:'✅', duracion:4500 });
+  _excelDatos = null; _excelMapeo = {};
 }
 
 /* ====================== ÍCONOS ====================== */
@@ -3474,6 +3641,7 @@ function vistaStock(){
     <button onclick="mostrarCategorias()" class="tap bg-white text-gray-700 border-2 border-gray-200 font-bold text-lg py-3.5 rounded-2xl">📂 Categorías</button>
     <button onclick="mostrarCombos()" class="tap bg-white text-gray-700 border-2 border-gray-200 font-bold text-lg py-3.5 rounded-2xl">🎁 Combos</button>
   </div>
+  <button onclick="mostrarImportarExcel()" class="tap w-full bg-white text-emerald-700 border-2 border-dashed border-emerald-200 font-bold text-base py-3 rounded-2xl mb-2 flex items-center justify-center gap-2">${icono('file-spreadsheet','w-5 h-5')} Importar desde Excel</button>
   <button onclick="mostrarImportarCatalogo()" class="tap w-full bg-white text-indigo-700 border-2 border-dashed border-indigo-200 font-bold text-base py-3 rounded-2xl mb-4 flex items-center justify-center gap-2">${icono('download','w-5 h-5')} Importar catálogo completo (${CATALOGO_PRODUCTOS.length} productos)</button>
 
   ${listaHTML}
