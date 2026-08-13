@@ -424,14 +424,22 @@ function sincronizarCatalogoPublico(){
     logoUrl: state.negocio.logoUrl || '',
     portadaUrl: state.negocio.portadaUrl || '',
     indexable: !!state.negocio.catalogoIndexable,
-    categorias: state.categorias.map(c => ({ id: c.id, nombre: c.nombre, emoji: c.emoji })),
+    categorias: state.categorias.map(c => ({ id: c.id, nombre: c.nombre, emoji: c.emoji || '' })),
     productos: state.productos.map(p => ({
       id: p.id, nombre: p.nombre, marca: p.marca || '', precio: p.precio,
-      emoji: p.emoji, imagen: p.imagen || '', categoriaId: p.categoriaId || '',
-      disponible: p.stock > 0, contenidoCantidad: p.contenidoCantidad, contenidoUnidad: p.contenidoUnidad
+      emoji: p.emoji || '', imagen: p.imagen || '', categoriaId: p.categoriaId || '',
+      disponible: p.stock > 0, contenidoCantidad: p.contenidoCantidad || 1, contenidoUnidad: p.contenidoUnidad || 'unidades'
     }))
   };
-  window.fbGuardarCatalogoPublico(usuarioFirebase.uid, datos).catch(() => {});
+  // setDoc tira una excepción sincrónica (no una promesa rechazada) si algún
+  // campo quedó en undefined, así que sin este try/catch un solo producto con
+  // un campo faltante bastaba para que la sincronización nunca se ejecutara
+  // y para que "guardar()" quedara silenciosamente cortado a la mitad.
+  try{
+    window.fbGuardarCatalogoPublico(usuarioFirebase.uid, datos).catch(() => {});
+  }catch(e){
+    console.error('No se pudo sincronizar el catálogo público:', e);
+  }
 }
 function urlCatalogoPublico(){
   return `${location.origin}${location.pathname}?tienda=${usuarioFirebase.uid}`;

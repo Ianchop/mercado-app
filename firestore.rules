@@ -1,0 +1,40 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function esAdmin() {
+      return request.auth != null && request.auth.token.email == 'psocikian@gmail.com';
+    }
+
+    match /negocios/{uid} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+
+    match /suscripciones/{uid} {
+      allow get: if request.auth != null && (request.auth.uid == uid || esAdmin());
+      allow list: if esAdmin();
+      allow create: if request.auth != null && request.auth.uid == uid;
+      allow update, delete: if esAdmin();
+    }
+
+    match /config/{docId} {
+      allow read: if request.auth != null;
+      allow write: if esAdmin();
+    }
+
+    // Espejo público del catálogo (solo nombre/precio/foto/disponibilidad,
+    // nunca costos ni datos del negocio): cualquiera sin login lo puede leer
+    // para ver el catálogo por QR/link, pero solo el dueño lo puede escribir.
+    match /catalogosPublicos/{uid} {
+      allow read: if true;
+      allow write: if request.auth != null && request.auth.uid == uid;
+    }
+
+    // Pedidos que un cliente manda desde el catálogo público, sin login:
+    // se pueden crear sin auth, pero solo el dueño del negocio (dueño del
+    // pedido, según negocioUid) los puede leer o actualizar.
+    match /pedidosPublicos/{pedidoId} {
+      allow create: if true;
+      allow read, update: if request.auth != null && request.auth.uid == resource.data.negocioUid;
+    }
+  }
+}
