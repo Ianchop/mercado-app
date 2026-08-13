@@ -332,9 +332,26 @@ let configPagos = { linkMercadoPago: '' };
    cualquier parte de la app. */
 let pedidosEntrantes = [];
 let _detenerEscuchaPedidos = null;
+// El primer snapshot de onSnapshot trae TODOS los pedidos existentes (no solo
+// los nuevos), así que sin esta bandera avisaríamos con sonido por pedidos
+// viejos cada vez que se abre la app. Solo avisamos desde el segundo snapshot
+// en adelante, comparando contra los ids ya vistos.
+let _primerSnapshotPedidos = true;
+let _idsPedidosVistos = new Set();
 function iniciarEscuchaPedidos(uid){
   if(_detenerEscuchaPedidos) return; // ya está escuchando
+  _primerSnapshotPedidos = true;
+  _idsPedidosVistos = new Set();
   _detenerEscuchaPedidos = window.fbEscucharPedidos(uid, (pedidos) => {
+    if(!_primerSnapshotPedidos){
+      const nuevos = pedidos.filter(p => !_idsPedidosVistos.has(p.id));
+      if(nuevos.length){
+        sonarAvisoPedido();
+        toast(nuevos.length === 1 ? `¡Pedido nuevo de ${nuevos[0].clienteNombre || 'un cliente'}!` : `¡${nuevos.length} pedidos nuevos!`, { icon:'🛍️', duracion:6000, acciones:[{ texto:'Ver', fn:"ir('#/pedidos')" }] });
+      }
+    }
+    pedidos.forEach(p => _idsPedidosVistos.add(p.id));
+    _primerSnapshotPedidos = false;
     pedidosEntrantes = pedidos.sort((a,b) => (b.fecha||0)-(a.fecha||0));
     renderApp();
   });
@@ -342,6 +359,22 @@ function iniciarEscuchaPedidos(uid){
 function detenerEscuchaPedidos(){
   if(_detenerEscuchaPedidos){ _detenerEscuchaPedidos(); _detenerEscuchaPedidos = null; }
   pedidosEntrantes = [];
+}
+function sonarAvisoPedido(){
+  try{
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    [880, 1175].forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.frequency.value = freq;
+      const inicio = ctx.currentTime + i*0.14;
+      gain.gain.setValueAtTime(0.001, inicio);
+      gain.gain.exponentialRampToValueAtTime(0.25, inicio+0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, inicio+0.35);
+      osc.start(inicio); osc.stop(inicio+0.35);
+    });
+  }catch(e){ /* navegador sin Web Audio: seguimos solo con el toast */ }
 }
 
 /* ====================== CONTRASEÑA OBLIGATORIA PARA CUENTAS DE GOOGLE ======================
@@ -2132,6 +2165,10 @@ function finalizarOnboarding(tipo){
     suscripcionActual = { email: usuarioFirebase.email, nombreNegocio: onboardingNombre, tipo, fechaCreacion: Date.now(), proximoVencimiento: '' };
     window.fbCrearSuscripcion(usuarioFirebase.uid, suscripcionActual).catch(() => {});
   }
+  // fbOnCambioAuth (donde normalmente arranca esto) ya pasó y en ese momento
+  // todavía no existía state.negocio, así que sin esto un negocio recién
+  // creado no empezaba a escuchar pedidos hasta el próximo login.
+  iniciarEscuchaPedidos(usuarioFirebase.uid);
   ir('#/inicio');
   renderApp();
 }
@@ -2315,6 +2352,19 @@ function vistaInicio(){
     ${tarjetaStat('book-open','Te deben (fiado)', money(totalFiado), '#fffbeb', '#b45309', "ir('#/fiado')")}
     ${tarjetaStat('package','Para reponer', bajoStock.length + ' producto' + (bajoStock.length===1?'':'s'), bajoStock.length>0 ? '#fef2f2' : '#f4f5f7', bajoStock.length>0 ? '#dc2626' : '#9ca3af', "ir('#/stock')")}
   </div>
+
+  ${pedidosEntrantes.filter(p => p.estado === 'nuevo').length ? `
+  <div class="card p-4 mt-4">
+    <div class="font-bold text-indigo-700 mb-2 flex items-center gap-2 text-lg">🛍️ Pedidos de clientes</div>
+    <div class="flex flex-col gap-2">
+      ${pedidosEntrantes.filter(p => p.estado === 'nuevo').slice(0,4).map(p => `
+        <div class="flex items-center justify-between text-gray-700">
+          <span>${p.clienteNombre || 'Cliente sin nombre'}</span>
+          <span class="font-bold">${money(p.total)}</span>
+        </div>`).join('')}
+    </div>
+    <button onclick="ir('#/pedidos')" class="tap mt-3 w-full bg-indigo-700 text-white font-bold py-3 rounded-xl">Ver pedidos</button>
+  </div>` : ''}
 
   ${bajoStock.length ? `
   <div class="card p-4 mt-4">
