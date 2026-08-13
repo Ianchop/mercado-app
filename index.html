@@ -25,7 +25,7 @@
     EmailAuthProvider, linkWithCredential
   } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-auth.js";
   import {
-    getFirestore, doc, getDoc, getDocFromCache, setDoc, updateDoc, collection, getDocs, addDoc, onSnapshot, query, where, enableIndexedDbPersistence
+    initializeFirestore, doc, getDoc, getDocFromCache, setDoc, updateDoc, collection, getDocs, addDoc, onSnapshot, query, where, enableIndexedDbPersistence
   } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-firestore.js";
 
   const firebaseConfig = {
@@ -39,7 +39,12 @@
 
   const fbApp = initializeApp(firebaseConfig);
   const fbAuth = getAuth(fbApp);
-  const fbDb = getFirestore(fbApp);
+  // getFirestore() por defecto usa un canal de streaming (WebChannel) que
+  // Safari bloquea con "Protección avanzada contra el rastreo" activada,
+  // tirando errores 400 en el RPC "Listen" y cortando en silencio hasta los
+  // guardados simples. initializeFirestore con long-polling forzado evita
+  // ese canal y usa peticiones normales, que Safari no bloquea.
+  const fbDb = initializeFirestore(fbApp, { experimentalAutoDetectLongPolling: true, useFetchStreams: false });
   try { await enableIndexedDbPersistence(fbDb); } catch(e) { /* varias pestañas abiertas u navegador viejo: seguimos solo-online */ }
 
   window.fbOnCambioAuth = (callback) => onAuthStateChanged(fbAuth, callback);
