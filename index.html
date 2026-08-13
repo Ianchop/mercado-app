@@ -4796,6 +4796,7 @@ function verDetalleVenta(id){
         <span>Total</span><span class="text-green-600">${money(venta.total)}</span>
       </div>
       <button onclick="imprimirComprobante('${id}')" class="tap w-full bg-gray-50 text-gray-700 font-bold py-3.5 rounded-2xl mb-2">🖨️ Imprimir comprobante</button>
+      ${state.negocio.emailjs?.serviceId ? `<button onclick="enviarComprobantePorEmail('${id}')" class="tap w-full bg-gray-50 text-gray-700 font-bold py-3.5 rounded-2xl mb-2">📧 Enviar por email</button>` : ''}
       <button onclick="eliminarVenta('${id}')" class="tap w-full bg-red-50 text-red-600 font-bold py-3.5 rounded-2xl">🗑️ Eliminar esta venta</button>
     </div>
   `);
@@ -4952,6 +4953,20 @@ function vistaConfig(){
       : `<div class="text-amber-600 text-xs font-semibold mb-3">Estás en modo prueba: las facturas NO son válidas fiscalmente todavía. Probá que ande bien acá antes de pasar a producción.</div>`}
     <button onclick="guardarConfigAfip()" class="tap w-full bg-white border-2 border-gray-200 text-gray-700 font-bold py-3 rounded-2xl">Guardar</button>
     ${state.negocio.afip?.certificado ? `<div class="text-emerald-600 text-sm font-semibold mt-2 text-center">✅ Configurado — ya aparece la opción en la Caja</div>` : ''}
+  </div>
+
+  <div class="card p-4 mb-4">
+    <div class="font-bold text-gray-700 mb-1 text-lg">📧 Comprobante por email</div>
+    <div class="text-gray-500 text-sm mb-3">Para poder mandarle el comprobante de la venta al mail del cliente. Necesitás una cuenta gratis en <a href="https://www.emailjs.com" target="_blank" class="text-indigo-700 underline">emailjs.com</a> (no pide tarjeta, 200 mails gratis por mes) conectada a tu Gmail/Outlook.</div>
+    <button onclick="mostrarAyudaEmailJS()" class="tap w-full bg-indigo-50 text-indigo-700 font-bold py-3 rounded-2xl mb-3">❓ ¿Cómo configuro esto?</button>
+    <label class="font-semibold text-gray-600 text-sm">Service ID</label>
+    <input id="cfg-email-service" value="${state.negocio.emailjs?.serviceId||''}" placeholder="service_xxxxxxx" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2 mb-3" />
+    <label class="font-semibold text-gray-600 text-sm">Template ID</label>
+    <input id="cfg-email-template" value="${state.negocio.emailjs?.templateId||''}" placeholder="template_xxxxxxx" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2 mb-3" />
+    <label class="font-semibold text-gray-600 text-sm">Public Key</label>
+    <input id="cfg-email-key" value="${state.negocio.emailjs?.publicKey||''}" placeholder="Tu Public Key" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2 mb-3" />
+    <button onclick="guardarConfigEmailJS()" class="tap w-full bg-white border-2 border-gray-200 text-gray-700 font-bold py-3 rounded-2xl">Guardar</button>
+    ${state.negocio.emailjs?.serviceId ? `<div class="text-emerald-600 text-sm font-semibold mt-2 text-center">✅ Configurado — ya aparece la opción al ver una venta</div>` : ''}
   </div>
 
   <div class="card p-4 mb-4">
@@ -5132,6 +5147,92 @@ function copiarCsrAfip(){
   navigator.clipboard.writeText(window.__csrGeneradoAfip || '')
     .then(() => toast('CSR copiado', {icon:'📋'}))
     .catch(() => toast('No se pudo copiar. Copialo a mano del cuadro de texto.', {icon:'⚠️'}));
+}
+
+/* ---- Comprobante por email (EmailJS) ----
+   Igual que MercadoPago: la API de EmailJS acepta llamadas directas desde
+   el navegador (se probó a mano, CORS abierto), así que no hace falta
+   backend — cada negocio conecta su propia cuenta gratuita de EmailJS. */
+function guardarConfigEmailJS(){
+  state.negocio.emailjs = {
+    serviceId: document.getElementById('cfg-email-service').value.trim(),
+    templateId: document.getElementById('cfg-email-template').value.trim(),
+    publicKey: document.getElementById('cfg-email-key').value.trim()
+  };
+  guardar();
+  renderApp();
+  toast('Guardado', {icon:'✅'});
+}
+function mostrarAyudaEmailJS(){
+  abrirModal(`
+    <div class="p-5">
+      <div class="text-xl font-extrabold text-gray-900 mb-3">Configurar comprobante por email</div>
+      <div class="bg-gray-50 rounded-2xl p-3 mb-3 text-sm text-gray-700 flex flex-col gap-2">
+        <div><b>1.</b> Creá una cuenta gratis en <a href="https://www.emailjs.com" target="_blank" class="text-indigo-700 underline">emailjs.com</a> (con tu mail, no pide tarjeta)</div>
+        <div><b>2.</b> "Email Services" → "Add New Service" → conectá tu Gmail/Outlook. Ahí te da el <b>Service ID</b></div>
+        <div><b>3.</b> "Email Templates" → "Create New Template". En el campo "To Email" de la plantilla poné <code>{{to_email}}</code></div>
+        <div><b>4.</b> En el cuerpo del mail, usá estas variables: <code>{{negocio_nombre}}</code>, <code>{{fecha}}</code>, <code>{{items}}</code>, <code>{{total}}</code></div>
+        <div><b>5.</b> Guardá la plantilla — te da el <b>Template ID</b></div>
+        <div><b>6.</b> "Account" → "General" → copiá tu <b>Public Key</b></div>
+        <div><b>7.</b> Pegá los tres datos en la pantalla anterior y guardá</div>
+      </div>
+      <button onclick="cerrarModal()" class="tap w-full bg-indigo-700 text-white font-bold py-3.5 rounded-2xl">Entendido</button>
+    </div>
+  `);
+}
+async function enviarComprobantePorEmail(ventaId){
+  const venta = state.ventas.find(v=>v.id===ventaId);
+  if(!venta) return;
+  const cfg = state.negocio.emailjs;
+  if(!cfg || !cfg.serviceId){ toast('Todavía no configuraste el email en Configuración', {icon:'⚠️', duracion:4000}); return; }
+  abrirModal(`
+    <div class="p-5">
+      <div class="text-xl font-extrabold text-gray-900 mb-4">Enviar comprobante</div>
+      <label class="font-semibold text-gray-600">Email del cliente</label>
+      <input id="email-destino" type="email" placeholder="cliente@ejemplo.com" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2 mb-4" />
+      <button onclick="confirmarEnvioEmail('${ventaId}')" class="tap w-full bg-indigo-700 text-white font-bold py-4 rounded-2xl text-lg">Enviar</button>
+    </div>
+  `);
+}
+async function confirmarEnvioEmail(ventaId){
+  const venta = state.ventas.find(v=>v.id===ventaId);
+  const email = document.getElementById('email-destino').value.trim();
+  if(!email || !email.includes('@')){ toast('Escribí un email válido', {icon:'✍️'}); return; }
+  const cfg = state.negocio.emailjs;
+  const items = venta.items.map(it => {
+    const p = state.productos.find(x=>x.id===it.productoId);
+    return `${it.cantidad}x ${p?p.nombre:'(producto eliminado)'}`;
+  });
+  const combos = (venta.combos||[]).map(cv => {
+    const c = state.combos.find(x=>x.id===cv.comboId);
+    return `${cv.cantidad}x ${c?c.nombre+' (combo)':'(combo eliminado)'}`;
+  });
+  abrirModal(`<div class="p-5 text-center py-16">${icono('loader-circle','w-8 h-8 animate-spin mx-auto text-gray-300')}<div class="text-gray-400 mt-3">Enviando...</div></div>`);
+  refrescarIconos();
+  try{
+    const resp = await conTimeout(fetch('https://api.emailjs.com/api/v1.0/email/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        service_id: cfg.serviceId,
+        template_id: cfg.templateId,
+        user_id: cfg.publicKey,
+        template_params: {
+          to_email: email,
+          negocio_nombre: state.negocio.nombre,
+          fecha: fechaHora(venta.fecha),
+          items: [...items, ...combos].join('\n'),
+          total: money(venta.total)
+        }
+      })
+    }), 15000);
+    if(!resp.ok){ const texto = await resp.text(); throw new Error(texto); }
+    cerrarModal();
+    toast('¡Comprobante enviado!', {icon:'✅'});
+  }catch(e){
+    cerrarModal();
+    toast('No se pudo enviar: ' + ((e&&e.message)||''), {icon:'⚠️', duracion:6000});
+  }
 }
 function dataUrlQrCatalogo(){
   if(typeof qrcode === 'undefined') return '';
