@@ -1677,7 +1677,24 @@ function mostrarMapeoImportarExcel(){
           </div>
         `).join('')}
       </div>
-      ${(colNombre===null || colNombre===undefined) ? `<div class="text-red-600 font-semibold text-sm mb-3">Elegí qué columna tiene el nombre del producto para poder importar.</div>` : ''}
+      ${(colNombre===null || colNombre===undefined) ? `<div class="text-red-600 font-semibold text-sm mb-3">Elegí qué columna tiene el nombre del producto para poder importar.</div>` : `
+      <div class="mb-4">
+        <div class="font-semibold text-gray-600 text-sm mb-2">Así se va a leer (revisá que los números estén bien):</div>
+        <div class="border-2 border-gray-200 rounded-xl overflow-hidden">
+          <div class="grid grid-cols-3 gap-2 bg-gray-50 px-3 py-2 text-xs font-bold text-gray-500">
+            <span>Nombre</span><span>Precio</span><span>Costo</span>
+          </div>
+          ${filasValidas.slice(0,5).map(f => `
+            <div class="grid grid-cols-3 gap-2 px-3 py-2 text-sm border-t border-gray-100">
+              <span class="truncate">${String(f[colNombre]||'').trim()}</span>
+              <span>${(_excelMapeo.precio!==null && _excelMapeo.precio!==undefined) ? money(parseNumeroExcel(f[_excelMapeo.precio])) : '—'}</span>
+              <span>${(_excelMapeo.costo!==null && _excelMapeo.costo!==undefined) ? money(parseNumeroExcel(f[_excelMapeo.costo])) : '—'}</span>
+            </div>
+          `).join('')}
+        </div>
+        ${filasValidas.length > 5 ? `<div class="text-gray-400 text-xs mt-1">...y ${filasValidas.length-5} más</div>` : ''}
+      </div>
+      `}
       <button onclick="confirmarImportarExcel()" class="tap w-full bg-indigo-700 text-white font-bold py-4 rounded-2xl text-lg mb-2" ${filasValidas.length===0?'disabled':''}>
         ${filasValidas.length===0 ? 'Elegí la columna de nombre' : `Importar ${filasValidas.length} producto${filasValidas.length===1?'':'s'}`}
       </button>
@@ -1699,12 +1716,16 @@ function parseNumeroExcel(valor){
   if(s.includes(',') && s.includes('.')){
     if(s.lastIndexOf(',') > s.lastIndexOf('.')) s = s.replace(/\./g,'').replace(',','.');
     else s = s.replace(/,/g,'');
-  } else if(s.includes(',')){
-    s = s.replace(',','.');
   } else if(/^\d{1,3}(\.\d{3})+$/.test(s)){
     // Solo puntos, en grupos de 3 dígitos (ej "1.000", "12.500"): es
     // separador de miles estilo argentino, no un punto decimal.
     s = s.replace(/\./g,'');
+  } else if(/^\d{1,3}(,\d{3})+$/.test(s)){
+    // Lo mismo pero con coma como separador de miles (ej "1,000"), como
+    // vienen algunas planillas exportadas en formato de EEUU.
+    s = s.replace(/,/g,'');
+  } else if(s.includes(',')){
+    s = s.replace(',','.');
   }
   const n = parseFloat(s);
   return isNaN(n) ? 0 : n;
