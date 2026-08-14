@@ -3848,7 +3848,7 @@ function vistaStock(){
     <button onclick="mostrarCombos()" class="tap bg-white text-gray-700 border-2 border-gray-200 font-bold text-lg py-3.5 rounded-2xl">🎁 Combos</button>
   </div>
   <button onclick="mostrarImportarExcel()" class="tap w-full bg-white text-emerald-700 border-2 border-dashed border-emerald-200 font-bold text-base py-3 rounded-2xl mb-2 flex items-center justify-center gap-2">${icono('file-spreadsheet','w-5 h-5')} Importar desde Excel</button>
-  <button onclick="mostrarImportarCatalogo()" class="tap w-full bg-white text-indigo-700 border-2 border-dashed border-indigo-200 font-bold text-base py-3 rounded-2xl mb-2 flex items-center justify-center gap-2">${icono('download','w-5 h-5')} Importar catálogo completo (${CATALOGO_PRODUCTOS.length} productos)</button>
+  ${!esRubroRopa() ? `<button onclick="mostrarImportarCatalogo()" class="tap w-full bg-white text-indigo-700 border-2 border-dashed border-indigo-200 font-bold text-base py-3 rounded-2xl mb-2 flex items-center justify-center gap-2">${icono('download','w-5 h-5')} Importar catálogo completo (${CATALOGO_PRODUCTOS.length} productos)</button>` : ''}
   ${state.productos.length ? `<button onclick="mostrarSelectorEtiquetas()" class="tap w-full bg-white text-gray-700 border-2 border-gray-200 font-bold text-base py-3 rounded-2xl mb-4 flex items-center justify-center gap-2">${icono('tag','w-5 h-5')} Imprimir etiquetas de precio</button>` : ''}
 
   ${listaHTML}
