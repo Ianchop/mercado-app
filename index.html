@@ -14,6 +14,8 @@
 <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/node-forge@1.3.1/dist/forge.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script type="module">
   // Firebase: cuentas reales (email/contraseña + Google) y datos en la nube.
   // Se importa como módulo ES directo desde el CDN de Google: cero instalación,
@@ -438,7 +440,22 @@ function migrarProductos(){
     if(state.negocio.mercadoPagoAccessToken === undefined) state.negocio.mercadoPagoAccessToken = '';
     if(state.negocio.envioActivado === undefined) state.negocio.envioActivado = false;
     if(state.negocio.envioPrecioKm === undefined) state.negocio.envioPrecioKm = 0;
+    if(state.negocio.envioLat === undefined) state.negocio.envioLat = null;
+    if(state.negocio.envioLng === undefined) state.negocio.envioLng = null;
   }
+}
+// Distancia en línea recta entre dos puntos (fórmula de Haversine), para no
+// depender de ninguna API de rutas paga: alcanza para estimar un costo de
+// envío razonable dentro de una ciudad.
+function distanciaKm(lat1, lng1, lat2, lng2){
+  const R = 6371;
+  const dLat = (lat2-lat1) * Math.PI/180;
+  const dLng = (lng2-lng1) * Math.PI/180;
+  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLng/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+function iconoMapaEnvio(emoji){
+  return L.divIcon({ html: `<div style="font-size:28px; line-height:28px; transform:translate(-50%,-100%);">${emoji}</div>`, className:'', iconSize:[28,28] });
 }
 
 let guardarTimeout = null;
@@ -467,6 +484,8 @@ function sincronizarCatalogoPublico(){
     indexable: !!state.negocio.catalogoIndexable,
     envioActivado: !!state.negocio.envioActivado,
     envioPrecioKm: state.negocio.envioPrecioKm || 0,
+    envioLat: state.negocio.envioLat ?? null,
+    envioLng: state.negocio.envioLng ?? null,
     categorias: state.categorias.map(c => ({ id: c.id, nombre: c.nombre, emoji: c.emoji || '' })),
     productos: state.productos.map(p => ({
       id: p.id, nombre: p.nombre, marca: p.marca || '', precio: p.precio,
@@ -1821,6 +1840,7 @@ function abrirModal(html){
 }
 function cerrarModal(){
   detenerEscaneo();
+  detenerMapasEnvio();
   document.getElementById('modal-wrap').style.display = 'none';
   document.getElementById('modal-box').innerHTML = '';
 }
@@ -4791,6 +4811,7 @@ function vistaPedidos(){
       <div class="flex justify-between font-bold text-gray-800 border-t border-gray-100 pt-2 mb-3">
         <span>Total</span><span>${money(p.total)}</span>
       </div>
+      ${(p.envioLat != null && p.envioLng != null) ? `<a href="https://www.google.com/maps?q=${p.envioLat},${p.envioLng}" target="_blank" class="tap w-full block text-center bg-indigo-50 text-indigo-700 font-bold py-2.5 rounded-xl text-sm mb-2">📍 Ver ubicación de entrega</a>` : ''}
       <div class="grid grid-cols-2 gap-2">
         ${p.clienteTelefono ? `<a href="https://wa.me/${limpiarTelefono(p.clienteTelefono)}" target="_blank" class="tap bg-green-50 text-green-700 font-bold py-2.5 rounded-xl text-center text-sm">💬 WhatsApp</a>` : `<span></span>`}
         ${p.estado !== 'completado'
@@ -4810,11 +4831,12 @@ function vistaPedidos(){
     </div>
     ${state.negocio.envioActivado ? `
     <label class="font-semibold text-gray-600 text-sm">Precio por km</label>
-    <div class="flex gap-2 mt-1">
+    <div class="flex gap-2 mt-1 mb-3">
       <input id="pedidos-precio-km" type="number" min="0" step="1" value="${state.negocio.envioPrecioKm || ''}" placeholder="Ej: 200" class="flex-1 border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg" />
       <button onclick="guardarPrecioKmEnvio()" class="tap bg-indigo-700 text-white font-bold px-5 rounded-2xl">Guardar</button>
     </div>
-    <div class="text-gray-400 text-xs mt-1">El cliente declara los km al hacer el pedido desde tu catálogo, y esto se le suma al total.</div>
+    <button onclick="mostrarMapaUbicacionLocal()" class="tap w-full bg-white border-2 border-dashed border-indigo-200 text-indigo-700 font-bold py-3 rounded-2xl text-sm flex items-center justify-center gap-2">📍 ${state.negocio.envioLat != null ? 'Cambiar ubicación del local' : 'Marcar ubicación del local'}</button>
+    <div class="text-gray-400 text-xs mt-1">${state.negocio.envioLat != null ? 'El cliente marca su dirección en un mapa y la app calcula la distancia sola.' : 'Marcá tu local en el mapa para que el cliente elija su dirección y la app calcule los km sola (mientras tanto, te va a preguntar los km a mano).'}</div>
     ` : ''}
   </div>
   ${listaHTML}
@@ -4830,6 +4852,73 @@ function guardarPrecioKmEnvio(){
   state.negocio.envioPrecioKm = val;
   guardar();
   toast('Guardado', {icon:'✅'});
+}
+
+/* ---- Ubicación del local en el mapa (para calcular distancia de envío) ---- */
+let _mapaEnvioLocal = null;
+let _marcadorEnvioLocal = null;
+function mostrarMapaUbicacionLocal(){
+  const lat = state.negocio.envioLat != null ? state.negocio.envioLat : -34.6037;
+  const lng = state.negocio.envioLng != null ? state.negocio.envioLng : -58.3816;
+  abrirModal(`
+    <div class="p-5">
+      <div class="text-xl font-extrabold text-gray-900 mb-1">Ubicación de tu local</div>
+      <div class="text-gray-500 text-sm mb-3">Buscá tu dirección o arrastrá el pin hasta el lugar exacto. Así la app calcula sola a cuántos km está cada cliente.</div>
+      <div class="flex gap-2 mb-2">
+        <input id="envio-buscar-local" placeholder="Buscar dirección..." class="flex-1 border-2 border-gray-200 rounded-2xl px-4 py-3 text-base" onkeydown="if(event.key==='Enter'){event.preventDefault(); buscarDireccionEnvioLocal();}" />
+        <button onclick="buscarDireccionEnvioLocal()" class="tap bg-indigo-700 text-white font-bold px-4 rounded-2xl">Buscar</button>
+      </div>
+      <div id="envio-resultados-local" class="mb-2"></div>
+      <div id="mapa-envio-local" style="height:280px; border-radius:16px; overflow:hidden;" class="border-2 border-gray-200 mb-3"></div>
+      <button onclick="guardarUbicacionLocal()" class="tap w-full bg-indigo-700 text-white font-bold py-4 rounded-2xl text-lg mb-2">Guardar ubicación</button>
+      <button onclick="cerrarModal()" class="tap w-full text-gray-400 font-semibold py-3">Cancelar</button>
+    </div>
+  `);
+  setTimeout(() => iniciarMapaEnvioLocal(lat, lng), 50);
+}
+function iniciarMapaEnvioLocal(lat, lng){
+  const div = document.getElementById('mapa-envio-local');
+  if(!div) return;
+  if(_mapaEnvioLocal){ try{ _mapaEnvioLocal.remove(); }catch(e){} _mapaEnvioLocal = null; }
+  _mapaEnvioLocal = L.map('mapa-envio-local').setView([lat, lng], state.negocio.envioLat != null ? 16 : 12);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution:'© OpenStreetMap', maxZoom:19 }).addTo(_mapaEnvioLocal);
+  _marcadorEnvioLocal = L.marker([lat, lng], { icon: iconoMapaEnvio('🏪'), draggable:true }).addTo(_mapaEnvioLocal);
+  _mapaEnvioLocal.on('click', (e) => _marcadorEnvioLocal.setLatLng(e.latlng));
+}
+async function buscarDireccionEnvioLocal(){
+  const q = document.getElementById('envio-buscar-local').value.trim();
+  if(!q) return;
+  const cont = document.getElementById('envio-resultados-local');
+  cont.innerHTML = '<div class="text-gray-400 text-sm py-2">Buscando...</div>';
+  try{
+    const resp = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=5&q=${encodeURIComponent(q)}`);
+    const resultados = await resp.json();
+    if(!resultados.length){ cont.innerHTML = '<div class="text-gray-400 text-sm py-2">No encontramos esa dirección.</div>'; return; }
+    cont.innerHTML = resultados.map(r => `<button onclick="elegirDireccionEnvioLocal(${r.lat},${r.lon})" class="tap w-full text-left bg-gray-50 rounded-xl px-3 py-2 text-sm text-gray-700 mb-1 truncate">${r.display_name}</button>`).join('');
+  }catch(e){
+    cont.innerHTML = '<div class="text-red-500 text-sm py-2">No se pudo buscar. Revisá tu conexión.</div>';
+  }
+}
+function elegirDireccionEnvioLocal(lat, lng){
+  if(_mapaEnvioLocal && _marcadorEnvioLocal){
+    _marcadorEnvioLocal.setLatLng([lat, lng]);
+    _mapaEnvioLocal.setView([lat, lng], 16);
+  }
+  document.getElementById('envio-resultados-local').innerHTML = '';
+}
+function guardarUbicacionLocal(){
+  if(!_marcadorEnvioLocal) return;
+  const { lat, lng } = _marcadorEnvioLocal.getLatLng();
+  state.negocio.envioLat = lat;
+  state.negocio.envioLng = lng;
+  guardar();
+  cerrarModal();
+  renderApp();
+  toast('Ubicación guardada', {icon:'📍'});
+}
+function detenerMapasEnvio(){
+  if(_mapaEnvioLocal){ try{ _mapaEnvioLocal.remove(); }catch(e){} _mapaEnvioLocal = null; _marcadorEnvioLocal = null; }
+  if(_mapaEnvioCliente){ try{ _mapaEnvioCliente.remove(); }catch(e){} _mapaEnvioCliente = null; _marcadorEnvioCliente = null; }
 }
 function cambiarEstadoPedido(id, estado){
   const p = pedidosEntrantes.find(x=>x.id===id);
@@ -5815,12 +5904,22 @@ let carritoPublico = [];       // [{productoId, cantidad}]
 let busquedaPublico = '';
 let categoriaPublico = '';
 let _pubQuiereEnvio = false;
-let _pubKmEnvio = '';
+let _pubKmEnvio = '';           // respaldo manual, solo si el local no marcó su ubicación
+let _pubLatEnvio = null;        // punto que el cliente marcó en el mapa
+let _pubLngEnvio = null;
+let _mapaEnvioCliente = null;
+let _marcadorEnvioCliente = null;
 function calcularEnvioPublico(){
   const d = catalogoPublicoDatos;
   if(!d || !d.envioActivado || !d.envioPrecioKm || !_pubQuiereEnvio) return { activo:false, km:0, costo:0 };
-  const km = parseFloat(_pubKmEnvio) || 0;
-  return { activo:true, km, costo: km * d.envioPrecioKm };
+  let km;
+  if(d.envioLat != null && d.envioLng != null && _pubLatEnvio != null && _pubLngEnvio != null){
+    km = distanciaKm(d.envioLat, d.envioLng, _pubLatEnvio, _pubLngEnvio);
+  } else {
+    km = parseFloat(_pubKmEnvio) || 0;
+  }
+  km = Math.round(km * 10) / 10;
+  return { activo:true, km, costo: Math.round(km * d.envioPrecioKm) };
 }
 
 async function arrancarCatalogoPublico(uidNegocio){
@@ -5959,12 +6058,22 @@ function mostrarCarritoPublico(){
           <input type="checkbox" id="pub-quiere-envio" ${_pubQuiereEnvio?'checked':''} onchange="cambiarQuiereEnvioPublico(this.checked)" class="w-5 h-5" />
           🚚 Quiero que me lo lleven a domicilio
         </label>
-        ${_pubQuiereEnvio ? `
+        ${_pubQuiereEnvio ? ((d.envioLat != null && d.envioLng != null) ? `
+        <div class="mt-2">
+          <label class="text-gray-500 text-sm">Buscá tu dirección o marcá el punto exacto en el mapa</label>
+          <div class="flex gap-2 mt-1 mb-2">
+            <input id="pub-buscar-direccion" placeholder="Buscar dirección..." class="flex-1 border-2 border-gray-200 rounded-2xl px-3 py-2.5 text-sm" onkeydown="if(event.key==='Enter'){event.preventDefault(); buscarDireccionEnvioCliente();}" />
+            <button onclick="buscarDireccionEnvioCliente()" class="tap bg-indigo-700 text-white font-bold px-3 rounded-xl text-sm">Buscar</button>
+          </div>
+          <div id="pub-resultados-direccion" class="mb-2"></div>
+          <div id="mapa-envio-cliente" style="height:220px; border-radius:16px; overflow:hidden;" class="border-2 border-gray-200"></div>
+          <div class="text-gray-400 text-sm mt-2">Distancia: <span id="pub-km-envio">${envio.km || '—'}</span> km · Costo de envío: <span id="pub-costo-envio">${money(envio.costo)}</span></div>
+        </div>` : `
         <div class="mt-2">
           <label class="text-gray-500 text-sm">¿A cuántos km estás del local?</label>
-          <input id="pub-km-envio" type="number" min="0" step="0.1" value="${_pubKmEnvio}" oninput="actualizarKmEnvioPublico(this.value)" placeholder="Ej: 3" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg mt-1" />
+          <input id="pub-km-envio-input" type="number" min="0" step="0.1" value="${_pubKmEnvio}" oninput="actualizarKmEnvioPublico(this.value)" placeholder="Ej: 3" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg mt-1" />
           <div class="text-gray-400 text-sm mt-1">Costo de envío: <span id="pub-costo-envio">${money(envio.costo)}</span></div>
-        </div>` : ''}
+        </div>`) : ''}
       </div>` : ''}
       <div class="flex justify-between font-extrabold text-lg mb-4 pt-3 border-t border-gray-100">
         <span>Total</span><span id="pub-total-final">${money(total)}</span>
@@ -5979,6 +6088,13 @@ function mostrarCarritoPublico(){
       <button onclick="cerrarModal()" class="tap w-full text-gray-400 font-semibold py-2">Seguir viendo</button>
     </div>
   `);
+  // abrirModal reemplaza todo el HTML del modal, así que el mapa (si estaba
+  // abierto) se queda apuntando a un <div> que ya no existe. Cada vez que se
+  // vuelve a mostrar el carrito (agregar/sacar producto, tildar envío, etc.)
+  // hay que reconstruirlo si corresponde que esté visible.
+  if(items.length && _pubQuiereEnvio && d.envioLat != null && d.envioLng != null){
+    setTimeout(() => iniciarMapaEnvioCliente(d.envioLat, d.envioLng), 50);
+  }
 }
 function cambiarQuiereEnvioPublico(checked){
   _pubQuiereEnvio = checked;
@@ -5986,17 +6102,66 @@ function cambiarQuiereEnvioPublico(checked){
 }
 // Actualiza solo el número en pantalla en vez de rehacer todo el modal, para
 // no perder el cursor/foco del input mientras el cliente todavía está
-// escribiendo los km.
+// escribiendo los km (usado solo cuando el local no marcó su ubicación en el mapa).
 function actualizarKmEnvioPublico(valor){
   _pubKmEnvio = valor;
+  actualizarCostoEnvioClienteUI();
+}
+function actualizarCostoEnvioClienteUI(){
   const d = catalogoPublicoDatos;
   const items = carritoPublico.map(it => ({ ...it, p: d.productos.find(x=>x.id===it.productoId) })).filter(x=>x.p);
   const totalProductos = items.reduce((s,x)=>s+x.p.precio*x.cantidad, 0);
   const envio = calcularEnvioPublico();
+  const elKm = document.getElementById('pub-km-envio');
   const elCosto = document.getElementById('pub-costo-envio');
   const elTotal = document.getElementById('pub-total-final');
+  if(elKm) elKm.textContent = envio.km || '—';
   if(elCosto) elCosto.textContent = money(envio.costo);
   if(elTotal) elTotal.textContent = money(totalProductos + envio.costo);
+}
+function iniciarMapaEnvioCliente(latLocal, lngLocal){
+  const div = document.getElementById('mapa-envio-cliente');
+  if(!div || typeof L === 'undefined') return;
+  if(_mapaEnvioCliente){ try{ _mapaEnvioCliente.remove(); }catch(e){} _mapaEnvioCliente = null; }
+  if(_pubLatEnvio == null){ _pubLatEnvio = latLocal; _pubLngEnvio = lngLocal; }
+  _mapaEnvioCliente = L.map('mapa-envio-cliente').setView([_pubLatEnvio, _pubLngEnvio], 14);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution:'© OpenStreetMap', maxZoom:19 }).addTo(_mapaEnvioCliente);
+  L.marker([latLocal, lngLocal], { icon: iconoMapaEnvio('🏪') }).addTo(_mapaEnvioCliente);
+  _marcadorEnvioCliente = L.marker([_pubLatEnvio, _pubLngEnvio], { icon: iconoMapaEnvio('📍'), draggable:true }).addTo(_mapaEnvioCliente);
+  _marcadorEnvioCliente.on('dragend', () => {
+    const p = _marcadorEnvioCliente.getLatLng();
+    _pubLatEnvio = p.lat; _pubLngEnvio = p.lng;
+    actualizarCostoEnvioClienteUI();
+  });
+  _mapaEnvioCliente.on('click', (e) => {
+    _marcadorEnvioCliente.setLatLng(e.latlng);
+    _pubLatEnvio = e.latlng.lat; _pubLngEnvio = e.latlng.lng;
+    actualizarCostoEnvioClienteUI();
+  });
+  actualizarCostoEnvioClienteUI();
+}
+async function buscarDireccionEnvioCliente(){
+  const input = document.getElementById('pub-buscar-direccion');
+  const q = input.value.trim();
+  if(!q) return;
+  const cont = document.getElementById('pub-resultados-direccion');
+  cont.innerHTML = '<div class="text-gray-400 text-xs py-1">Buscando...</div>';
+  try{
+    const resp = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=5&q=${encodeURIComponent(q)}`);
+    const resultados = await resp.json();
+    if(!resultados.length){ cont.innerHTML = '<div class="text-gray-400 text-xs py-1">No encontramos esa dirección.</div>'; return; }
+    cont.innerHTML = resultados.map(r => `<button onclick="elegirDireccionEnvioCliente(${r.lat},${r.lon})" class="tap w-full text-left bg-gray-50 rounded-lg px-3 py-2 text-xs text-gray-700 mb-1 truncate">${r.display_name}</button>`).join('');
+  }catch(e){
+    cont.innerHTML = '<div class="text-red-500 text-xs py-1">No se pudo buscar. Revisá tu conexión.</div>';
+  }
+}
+function elegirDireccionEnvioCliente(lat, lng){
+  _pubLatEnvio = lat; _pubLngEnvio = lng;
+  if(_marcadorEnvioCliente) _marcadorEnvioCliente.setLatLng([lat, lng]);
+  if(_mapaEnvioCliente) _mapaEnvioCliente.setView([lat, lng], 16);
+  const cont = document.getElementById('pub-resultados-direccion');
+  if(cont) cont.innerHTML = '';
+  actualizarCostoEnvioClienteUI();
 }
 function textoPedidoPublico(items, total, envio){
   let txt = 'Hola! Quiero hacer un pedido:\n\n';
@@ -6036,6 +6201,8 @@ async function enviarPedidoPublicoWeb(){
       items: items.map(x => ({ productoId: x.p.id, nombre: x.p.nombre, cantidad: x.cantidad, precio: x.p.precio })),
       envioKm: envio.activo ? envio.km : 0,
       envioCosto: envio.activo ? envio.costo : 0,
+      envioLat: (envio.activo && _pubLatEnvio != null) ? _pubLatEnvio : null,
+      envioLng: (envio.activo && _pubLngEnvio != null) ? _pubLngEnvio : null,
       total,
       estado: 'nuevo',
       fecha: Date.now()
@@ -6043,6 +6210,8 @@ async function enviarPedidoPublicoWeb(){
     carritoPublico = [];
     _pubQuiereEnvio = false;
     _pubKmEnvio = '';
+    _pubLatEnvio = null;
+    _pubLngEnvio = null;
     cerrarModal();
     renderCatalogoPublico();
     toast('¡Pedido enviado! Te van a contactar por WhatsApp para confirmar.', { icon:'✅', duracion:5000 });
