@@ -496,7 +496,8 @@ function sincronizarCatalogoPublico(){
     productos: state.productos.map(p => ({
       id: p.id, nombre: p.nombre, marca: p.marca || '', precio: p.precio,
       emoji: p.emoji || '', imagen: p.imagen || '', categoriaId: p.categoriaId || '',
-      disponible: p.stock > 0, contenidoCantidad: p.contenidoCantidad || 1, contenidoUnidad: p.contenidoUnidad || 'unidades'
+      disponible: p.stock > 0, contenidoCantidad: p.contenidoCantidad || 1, contenidoUnidad: p.contenidoUnidad || 'unidades',
+      variantes: (p.variantes || []).map(v => ({ talle: v.talle || '', color: v.color || '', stock: v.stock || 0 }))
     }))
   };
   // setDoc tira una excepción sincrónica (no una promesa rechazada) si algún
@@ -4979,7 +4980,7 @@ function vistaPedidos(){
       </div>
       <div class="text-gray-400 text-xs mb-2">${p.fecha ? fechaHora(p.fecha) : ''}</div>
       <div class="flex flex-col gap-1 mb-2">
-        ${(p.items||[]).map(it => `<div class="text-sm text-gray-600 flex justify-between"><span>${it.cantidad} x ${it.nombre}</span><span>${money(it.precio*it.cantidad)}</span></div>`).join('')}
+        ${(p.items||[]).map(it => `<div class="text-sm text-gray-600 flex justify-between"><span>${it.cantidad} x ${it.nombre}${it.talle?` (${it.talle}${it.color?' · '+it.color:''})`:''}</span><span>${money(it.precio*it.cantidad)}</span></div>`).join('')}
         ${p.envioCosto > 0 ? `<div class="text-sm text-indigo-700 flex justify-between font-semibold"><span>🚚 Envío (${p.envioKm} km)</span><span>${money(p.envioCosto)}</span></div>` : ''}
       </div>
       <div class="flex justify-between font-bold text-gray-800 border-t border-gray-100 pt-2 mb-3">
@@ -6122,6 +6123,7 @@ let catalogoPublicoDatos = null;
 let carritoPublico = [];       // [{productoId, cantidad}]
 let busquedaPublico = '';
 let categoriaPublico = '';
+let talleFiltroPublico = '';
 let _pubQuiereEnvio = false;
 let _pubKmEnvio = '';           // respaldo manual, solo si el local no marcó su ubicación
 let _pubLatEnvio = null;        // punto que el cliente marcó en el mapa
@@ -6175,9 +6177,11 @@ function renderCatalogoPublico(){
   const selStart = idActivo && 'selectionStart' in activo ? activo.selectionStart : null;
   const d = catalogoPublicoDatos;
   const categoriasConProductos = d.categorias.filter(c => d.productos.some(p => p.categoriaId === c.id));
+  const tallesDisponibles = [...new Set(d.productos.flatMap(p => (p.variantes||[]).filter(v=>v.stock>0).map(v=>v.talle)))];
   const q = normalizarTexto(busquedaPublico);
   let productos = d.productos;
   if(categoriaPublico) productos = productos.filter(p => p.categoriaId === categoriaPublico);
+  if(talleFiltroPublico) productos = productos.filter(p => (p.variantes||[]).some(v=>v.talle===talleFiltroPublico && v.stock>0));
   if(q) productos = productos.filter(p => normalizarTexto(p.nombre).includes(q) || normalizarTexto(p.marca||'').includes(q));
   const cantCarrito = carritoPublico.reduce((s,it)=>s+it.cantidad,0);
   const totalCarrito = carritoPublico.reduce((s,it) => {
@@ -6203,6 +6207,11 @@ function renderCatalogoPublico(){
         <button onclick="filtrarCategoriaPublico('')" class="tap flex-shrink-0 px-4 py-2 rounded-full font-bold text-sm ${!categoriaPublico?'bg-indigo-700 text-white':'bg-gray-100 text-gray-600'}">Todo</button>
         ${categoriasConProductos.map(c => `<button onclick="filtrarCategoriaPublico('${c.id}')" class="tap flex-shrink-0 px-4 py-2 rounded-full font-bold text-sm ${categoriaPublico===c.id?'bg-indigo-700 text-white':'bg-gray-100 text-gray-600'}">${c.emoji||''} ${c.nombre}</button>`).join('')}
       </div>` : ''}
+      ${tallesDisponibles.length ? `
+      <div class="flex gap-2 overflow-x-auto pb-3 mb-1">
+        <button onclick="filtrarTallePublico('')" class="tap flex-shrink-0 px-3 py-1.5 rounded-full font-bold text-xs border-2 ${!talleFiltroPublico?'bg-indigo-700 text-white border-indigo-700':'bg-white text-gray-600 border-gray-200'}">Todos los talles</button>
+        ${tallesDisponibles.map(t => `<button onclick="filtrarTallePublico('${t}')" class="tap flex-shrink-0 px-3 py-1.5 rounded-full font-bold text-xs border-2 ${talleFiltroPublico===t?'bg-indigo-700 text-white border-indigo-700':'bg-white text-gray-600 border-gray-200'}">${t}</button>`).join('')}
+      </div>` : ''}
     </div>
     <div class="px-4 grid grid-cols-2 gap-3 pb-28">
       ${productos.length ? productos.map(p => `
@@ -6211,7 +6220,7 @@ function renderCatalogoPublico(){
           <div class="font-bold text-gray-800 text-sm leading-tight mb-1" style="min-height:2.5em;">${p.nombre}</div>
           <div class="text-indigo-700 font-extrabold mb-2">${money(p.precio)}</div>
           ${p.disponible
-            ? `<button onclick="agregarAlCarritoPublico('${p.id}')" class="tap w-full bg-indigo-700 text-white font-bold py-2 rounded-xl text-sm">+ Agregar</button>`
+            ? `<button onclick="${p.variantes && p.variantes.length ? `abrirSelectorVarianteCatalogoPublico('${p.id}')` : `agregarAlCarritoPublico('${p.id}')`}" class="tap w-full bg-indigo-700 text-white font-bold py-2 rounded-xl text-sm">${p.variantes && p.variantes.length ? 'Elegir talle' : '+ Agregar'}</button>`
             : `<div class="w-full text-center text-gray-300 font-bold py-2 text-sm">Sin stock</div>`}
         </div>
       `).join('') : `<div class="col-span-2 text-center py-16 text-gray-400">No encontramos productos</div>`}
@@ -6230,19 +6239,57 @@ function renderCatalogoPublico(){
 }
 function filtrarCatalogoPublico(v){ busquedaPublico = v; renderCatalogoPublico(); }
 function filtrarCategoriaPublico(id){ categoriaPublico = id; renderCatalogoPublico(); }
+function filtrarTallePublico(t){ talleFiltroPublico = t; renderCatalogoPublico(); }
 function agregarAlCarritoPublico(productoId){
-  const it = carritoPublico.find(x=>x.productoId===productoId);
+  const it = carritoPublico.find(x=>x.productoId===productoId && !x.talle);
   if(it) it.cantidad++; else carritoPublico.push({ productoId, cantidad: 1 });
   renderCatalogoPublico();
   const estaEnCarrito = document.getElementById('modal-wrap').style.display === 'block';
   if(estaEnCarrito) mostrarCarritoPublico();
   else toast('Agregado al carrito', { icon:'🛒', duracion:1500 });
 }
+function abrirSelectorVarianteCatalogoPublico(productoId){
+  const d = catalogoPublicoDatos;
+  const p = d.productos.find(x=>x.id===productoId);
+  if(!p) return;
+  const hayColores = p.variantes.some(v=>v.color);
+  abrirModal(`
+    <div class="p-5">
+      <div class="text-xl font-extrabold text-gray-900 mb-1">${p.nombre}</div>
+      <div class="text-gray-400 text-sm mb-4">Elegí el talle${hayColores?' y color':''}</div>
+      <div class="flex flex-col gap-2">
+        ${p.variantes.map(va => `
+          <button onclick="agregarVarianteAlCarritoPublico('${productoId}','${va.talle}','${(va.color||'').replace(/'/g,"\\'")}')" class="tap w-full flex items-center justify-between bg-gray-50 rounded-2xl px-4 py-3.5 ${va.stock<=0?'opacity-40 pointer-events-none':''}">
+            <span class="font-bold text-gray-800">${va.talle}${va.color?' · '+va.color:''}</span>
+            <span class="text-gray-500 text-sm">${va.stock>0?'Disponible':'Sin stock'}</span>
+          </button>
+        `).join('')}
+      </div>
+      <button onclick="cerrarModal()" class="tap w-full text-gray-400 font-semibold py-3 mt-3">Cancelar</button>
+    </div>
+  `);
+}
+function agregarVarianteAlCarritoPublico(productoId, talle, color){
+  const it = carritoPublico.find(x=>x.productoId===productoId && x.talle===talle && (x.color||'')===(color||''));
+  if(it) it.cantidad++; else carritoPublico.push({ productoId, cantidad:1, talle, color });
+  renderCatalogoPublico();
+  cerrarModal();
+  mostrarCarritoPublico();
+}
+function ajustarCantidadCarritoPublicoItem(productoId, talle, color, delta){
+  if(!talle){ delta>0 ? agregarAlCarritoPublico(productoId) : quitarDelCarritoPublico(productoId); return; }
+  const it = carritoPublico.find(x=>x.productoId===productoId && x.talle===talle && (x.color||'')===(color||''));
+  if(!it) return;
+  it.cantidad += delta;
+  if(it.cantidad<=0) carritoPublico = carritoPublico.filter(x=>x!==it);
+  renderCatalogoPublico();
+  mostrarCarritoPublico();
+}
 function quitarDelCarritoPublico(productoId){
-  const it = carritoPublico.find(x=>x.productoId===productoId);
+  const it = carritoPublico.find(x=>x.productoId===productoId && !x.talle);
   if(!it) return;
   it.cantidad--;
-  if(it.cantidad<=0) carritoPublico = carritoPublico.filter(x=>x.productoId!==productoId);
+  if(it.cantidad<=0) carritoPublico = carritoPublico.filter(x=>x!==it);
   renderCatalogoPublico();
   mostrarCarritoPublico();
 }
@@ -6260,13 +6307,13 @@ function mostrarCarritoPublico(){
         ${items.length ? items.map(x => `
           <div class="flex items-center justify-between gap-2">
             <div class="flex-1 min-w-0">
-              <div class="font-bold text-gray-800 text-sm truncate">${x.p.nombre}</div>
+              <div class="font-bold text-gray-800 text-sm truncate">${x.p.nombre}${x.talle?` <span class="text-gray-400 font-normal">(${x.talle}${x.color?' · '+x.color:''})</span>`:''}</div>
               <div class="text-gray-400 text-xs">${money(x.p.precio)} c/u</div>
             </div>
             <div class="flex items-center gap-2 flex-shrink-0">
-              <button onclick="quitarDelCarritoPublico('${x.p.id}')" class="tap w-8 h-8 rounded-full bg-gray-100 font-bold">-</button>
+              <button onclick="ajustarCantidadCarritoPublicoItem('${x.p.id}','${x.talle||''}','${(x.color||'').replace(/'/g,"\\'")}', -1)" class="tap w-8 h-8 rounded-full bg-gray-100 font-bold">-</button>
               <span class="font-bold w-5 text-center">${x.cantidad}</span>
-              <button onclick="agregarAlCarritoPublico('${x.p.id}')" class="tap w-8 h-8 rounded-full bg-gray-100 font-bold">+</button>
+              <button onclick="ajustarCantidadCarritoPublicoItem('${x.p.id}','${x.talle||''}','${(x.color||'').replace(/'/g,"\\'")}', 1)" class="tap w-8 h-8 rounded-full bg-gray-100 font-bold">+</button>
             </div>
           </div>
         `).join('') : `<div class="text-gray-400 text-center py-6">Carrito vacío</div>`}
@@ -6401,7 +6448,7 @@ function usarUbicacionActualCliente(){
 }
 function textoPedidoPublico(items, total, envio){
   let txt = 'Hola! Quiero hacer un pedido:\n\n';
-  items.forEach(x => { txt += `• ${x.cantidad} x ${x.p.nombre} — ${money(x.p.precio*x.cantidad)}\n`; });
+  items.forEach(x => { txt += `• ${x.cantidad} x ${x.p.nombre}${x.talle?` (${x.talle}${x.color?' · '+x.color:''})`:''} — ${money(x.p.precio*x.cantidad)}\n`; });
   if(envio && envio.activo) txt += `• Envío a domicilio (${envio.km} km) — ${money(envio.costo)}\n`;
   txt += `\nTotal: ${money(total)}`;
   return txt;
@@ -6434,7 +6481,7 @@ async function enviarPedidoPublicoWeb(){
       negocioUid: catalogoPublicoUid,
       clienteNombre: nombre,
       clienteTelefono: telefono,
-      items: items.map(x => ({ productoId: x.p.id, nombre: x.p.nombre, cantidad: x.cantidad, precio: x.p.precio })),
+      items: items.map(x => ({ productoId: x.p.id, nombre: x.p.nombre, cantidad: x.cantidad, precio: x.p.precio, talle: x.talle||'', color: x.color||'' })),
       envioKm: envio.activo ? envio.km : 0,
       envioCosto: envio.activo ? envio.costo : 0,
       envioLat: (envio.activo && _pubLatEnvio != null) ? _pubLatEnvio : null,
