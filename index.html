@@ -577,6 +577,36 @@ function estadoTemporadaProducto(p){
   if(p.temporada === actual) return { texto: 'En temporada', color: 'green' };
   return { texto: `Fuera de temporada (${p.temporada})`, color: 'amber' };
 }
+// No sabemos hace cuánto quedó fuera de temporada (no se guarda esa fecha),
+// así que la sugerencia se basa en cuánto stock de más queda respecto al
+// mínimo: cuanto más sobra, más conviene liquidarlo rápido.
+function sugerenciaLiquidacion(p){
+  const ratio = p.stock / Math.max(1, p.stockMin);
+  let porcentaje = 15;
+  if(ratio > 3) porcentaje = 35;
+  else if(ratio > 1.5) porcentaje = 25;
+  const precioSugerido = Math.max(0, Math.round(p.precio * (1 - porcentaje/100) / 10) * 10);
+  return { porcentaje, precioSugerido };
+}
+function aplicarLiquidacion(id){
+  const p = state.productos.find(x=>x.id===id);
+  if(!p) return;
+  const { porcentaje, precioSugerido } = sugerenciaLiquidacion(p);
+  if(p.precioOriginalLiquidacion === undefined) p.precioOriginalLiquidacion = p.precio;
+  p.precio = precioSugerido;
+  guardar();
+  renderApp();
+  toast(`Precio de liquidación aplicado: ${money(precioSugerido)} (-${porcentaje}%)`, { icon:'🏷️', duracion:4500 });
+}
+function revertirLiquidacion(id){
+  const p = state.productos.find(x=>x.id===id);
+  if(!p || p.precioOriginalLiquidacion === undefined) return;
+  p.precio = p.precioOriginalLiquidacion;
+  delete p.precioOriginalLiquidacion;
+  guardar();
+  renderApp();
+  toast('Precio original restaurado', { icon:'↩️' });
+}
 function detalleProducto(p){
   const partes = [];
   if(p.marca) partes.push(p.marca);
@@ -4299,7 +4329,25 @@ function vistaTemporadas(){
         </div>
         <span class="badge-venc whitespace-nowrap" style="background:#fffbeb;color:#b45309;">${p.temporada}</span>
       </div>
+      ${p.precioOriginalLiquidacion !== undefined ? `
+      <div class="bg-emerald-50 text-emerald-700 rounded-xl px-3 py-2 text-sm font-semibold mb-2 flex items-center justify-between">
+        <span>🏷️ En liquidación: ${money(p.precio)} <span class="line-through text-emerald-400 font-normal">${money(p.precioOriginalLiquidacion)}</span></span>
+      </div>
+      <div class="grid grid-cols-2 gap-2">
+        <button onclick="mostrarFormProducto('${p.id}')" class="tap bg-gray-50 text-gray-700 font-bold py-2.5 rounded-xl text-sm">Actualizar temporada</button>
+        <button onclick="revertirLiquidacion('${p.id}')" class="tap bg-gray-50 text-gray-700 font-bold py-2.5 rounded-xl text-sm">↩️ Volver al precio original</button>
+      </div>
+      ` : (p.stock>0 ? `
+      <div class="bg-amber-50 text-amber-700 rounded-xl px-3 py-2 text-sm font-semibold mb-2">
+        💡 Sugerencia: bajar a ${money(sugerenciaLiquidacion(p).precioSugerido)} (-${sugerenciaLiquidacion(p).porcentaje}%) para moverlo rápido
+      </div>
+      <div class="grid grid-cols-2 gap-2">
+        <button onclick="mostrarFormProducto('${p.id}')" class="tap bg-gray-50 text-gray-700 font-bold py-2.5 rounded-xl text-sm">Actualizar temporada</button>
+        <button onclick="aplicarLiquidacion('${p.id}')" class="tap bg-amber-500 text-white font-bold py-2.5 rounded-xl text-sm">🏷️ Aplicar liquidación</button>
+      </div>
+      ` : `
       <button onclick="mostrarFormProducto('${p.id}')" class="tap w-full bg-gray-50 text-gray-700 font-bold py-2.5 rounded-xl text-sm">Actualizar temporada</button>
+      `)}
     </div>`).join('')}
   ` : `
   <div class="text-center py-16 text-gray-400">
