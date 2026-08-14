@@ -4065,8 +4065,6 @@ function mostrarFormProducto(id = null, override = null){
         <input id="pf-emoji" value="${v.emoji}" class="col-span-1 border-2 border-gray-200 rounded-2xl px-2 py-3 text-2xl text-center" />
         <input id="pf-nombre" value="${v.nombre}" placeholder="Nombre del producto" class="col-span-3 border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg" />
       </div>
-      <input type="file" accept="image/*" capture="environment" id="pf-input-foto" style="display:none" onchange="capturarFotoProducto(event, '${id||''}')" />
-      <button onclick="document.getElementById('pf-input-foto').click()" class="tap w-full bg-white border-2 border-gray-200 text-gray-600 font-semibold py-2.5 rounded-xl text-sm mb-3 flex items-center justify-center gap-2">📷 ${v.imagen ? 'Cambiar foto' : 'Sacar foto (opcional, si no alcanza el emoji)'}</button>
       <label class="font-semibold text-gray-600">Marca (opcional)</label>
       <input id="pf-marca" value="${v.marca}" list="pf-marcas-sugeridas" placeholder="${ropa ? "Ej: Levi's" : 'Ej: La Serenísima'}" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2" />
       ${ropa ? `<datalist id="pf-marcas-sugeridas">${MARCAS_SUGERIDAS_ROPA.map(m=>`<option value="${m}">`).join('')}</datalist>` : ''}
@@ -4175,30 +4173,6 @@ function escanearParaFormProducto(id){
     mostrarFormProducto(id || null, valores);
     toast('Código escaneado', { icon:'📷' });
   });
-}
-// Comprimida a 400px de ancho y JPEG al 60%: una foto de celular normal pesa
-// varios MB, así queda en unos 30-80kb, liviana para el catálogo público y
-// muy por debajo del límite de 1MB por documento de Firestore.
-function capturarFotoProducto(event, id){
-  const file = event.target.files[0];
-  if(!file) return;
-  const reader = new FileReader();
-  reader.onload = (e) => {
-    const img = new Image();
-    img.onload = () => {
-      const maxAncho = 400;
-      const escala = Math.min(1, maxAncho / img.width);
-      const canvas = document.createElement('canvas');
-      canvas.width = Math.round(img.width * escala);
-      canvas.height = Math.round(img.height * escala);
-      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
-      mostrarFormProducto(id || null, { ...capturarValoresFormProducto(), imagen: dataUrl });
-      toast('Foto agregada', { icon:'📷' });
-    };
-    img.src = e.target.result;
-  };
-  reader.readAsDataURL(file);
 }
 function agregarVarianteFormProducto(id){
   const talle = document.getElementById('pf-nueva-talle').value;
