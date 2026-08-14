@@ -430,6 +430,7 @@ function migrarProductos(){
     if(p.categoriaId === undefined) p.categoriaId = '';
     if(p.proveedorId === undefined) p.proveedorId = '';
     if(p.codigoBarras === undefined) p.codigoBarras = '';
+    if(p.variantes === undefined) p.variantes = [];
   });
   if(state.negocio){
     if(state.negocio.telefono === undefined) state.negocio.telefono = '';
@@ -578,7 +579,9 @@ function estadoTemporadaProducto(p){
 function detalleProducto(p){
   const partes = [];
   if(p.marca) partes.push(p.marca);
-  if(!(p.contenidoUnidad === 'unidades' && Number(p.contenidoCantidad) === 1)){
+  if(p.variantes && p.variantes.length){
+    partes.push([...new Set(p.variantes.map(v=>v.talle))].join('/'));
+  } else if(!(p.contenidoUnidad === 'unidades' && Number(p.contenidoCantidad) === 1)){
     partes.push(`${p.contenidoCantidad} ${p.contenidoUnidad}`);
   }
   return partes.join(' · ');
@@ -2724,12 +2727,12 @@ function vistaCaja(){
     ? state.combos
     : (texto ? state.combos.filter(c => c.nombre.toLowerCase().includes(texto)) : []);
 
-  const items = Object.entries(carrito).filter(([,c])=>c>0);
+  const items = itemsDelCarrito();
   const combosCarrito = Object.entries(carritoCombos).filter(([,c])=>c>0);
-  const totalItems = items.reduce((s,[id,c]) => { const p = state.productos.find(x=>x.id===id); return s + (p?p.precio*c:0); }, 0);
+  const totalItems = items.reduce((s,it) => { const p = state.productos.find(x=>x.id===it.productoId); return s + (p?p.precio*it.cantidad:0); }, 0);
   const totalCombos = combosCarrito.reduce((s,[id,c]) => { const cb = state.combos.find(x=>x.id===id); return s + (cb?cb.precio*c:0); }, 0);
   const total = totalItems + totalCombos;
-  const cantidadTotal = items.reduce((s,[,c])=>s+c,0) + combosCarrito.reduce((s,[,c])=>s+c,0);
+  const cantidadTotal = items.reduce((s,it)=>s+it.cantidad,0) + combosCarrito.reduce((s,[,c])=>s+c,0);
   const hayCarrito = items.length>0 || combosCarrito.length>0;
 
   return `
@@ -2768,8 +2771,8 @@ function vistaCaja(){
 
     <div class="grid cards-grid gap-3 ${hayCarrito ? 'mb-32' : 'mb-4'}">
       ${productos.length ? productos.map(p => `
-        <button id="prod-${p.id}" onclick="agregarAlCarrito('${p.id}')" class="tap card p-4 flex flex-col items-center gap-1 relative">
-          ${carrito[p.id] ? `<span class="absolute -top-2 -right-2 bg-indigo-700 text-white text-sm font-bold w-7 h-7 rounded-full flex items-center justify-center">${carrito[p.id]}</span>` : ''}
+        <button id="prod-${p.id}" onclick="${p.variantes && p.variantes.length ? `abrirSelectorVarianteCaja('${p.id}')` : `agregarAlCarrito('${p.id}')`}" class="tap card p-4 flex flex-col items-center gap-1 relative">
+          ${cantidadEnCarrito(p.id) ? `<span class="absolute -top-2 -right-2 bg-indigo-700 text-white text-sm font-bold w-7 h-7 rounded-full flex items-center justify-center">${cantidadEnCarrito(p.id)}</span>` : ''}
           ${iconoProducto(p, 'w-12 h-12', 'text-4xl')}
           <span class="font-bold text-gray-800 text-center leading-tight">${p.nombre}</span>
           ${detalleProducto(p) ? `<span class="text-gray-400 text-xs text-center leading-tight">${detalleProducto(p)}</span>` : ''}
@@ -2807,6 +2810,83 @@ function agregarAlCarrito(id, cantidad = 1){
   renderApp();
   const el = document.getElementById('prod-'+id);
   if(el){ el.classList.add('bounce-add'); setTimeout(()=>el.classList.remove('bounce-add'), 280); }
+}
+// Para productos con talles/colores, carrito[id] deja de ser un número y pasa
+// a ser un objeto { "talle||color": cantidad } — así un producto sin
+// variantes sigue funcionando exactamente igual que siempre (carrito[id] es
+// un número), y solo los productos con talles usan la forma más compleja.
+function claveVariante(talle, color){ return talle + '||' + (color||''); }
+function cantidadEnCarrito(id){
+  const val = carrito[id];
+  if(!val) return 0;
+  if(typeof val === 'object') return Object.values(val).reduce((s,c)=>s+c, 0);
+  return val;
+}
+function itemsDelCarrito(){
+  const items = [];
+  Object.entries(carrito).forEach(([id, val]) => {
+    if(typeof val === 'object' && val !== null){
+      Object.entries(val).forEach(([clave, cantidad]) => {
+        if(cantidad > 0){
+          const [talle, color] = clave.split('||');
+          items.push({ productoId:id, cantidad, talle, color });
+        }
+      });
+    } else if(val > 0){
+      items.push({ productoId:id, cantidad:val });
+    }
+  });
+  return items;
+}
+function abrirSelectorVarianteCaja(id){
+  const p = state.productos.find(x=>x.id===id);
+  if(!p) return;
+  const hayColores = p.variantes.some(v=>v.color);
+  abrirModal(`
+    <div class="p-5">
+      <div class="text-xl font-extrabold text-gray-900 mb-1">${p.nombre}</div>
+      <div class="text-gray-400 text-sm mb-4">Elegí el talle${hayColores?' y color':''}</div>
+      <div class="flex flex-col gap-2">
+        ${p.variantes.map(va => `
+          <button onclick="agregarVarianteAlCarrito('${id}','${va.talle}','${(va.color||'').replace(/'/g,"\\'")}')" class="tap w-full flex items-center justify-between bg-gray-50 rounded-2xl px-4 py-3.5 ${va.stock<=0?'opacity-40 pointer-events-none':''}">
+            <span class="font-bold text-gray-800">${va.talle}${va.color?' · '+va.color:''}</span>
+            <span class="text-gray-500 text-sm">${va.stock>0?'Quedan '+va.stock:'Sin stock'}</span>
+          </button>
+        `).join('')}
+      </div>
+      <button onclick="cerrarModal()" class="tap w-full text-gray-400 font-semibold py-3 mt-3">Cancelar</button>
+    </div>
+  `);
+}
+function agregarVarianteAlCarrito(id, talle, color){
+  if(typeof carrito[id] !== 'object' || carrito[id] === null) carrito[id] = {};
+  const clave = claveVariante(talle, color);
+  carrito[id][clave] = (carrito[id][clave] || 0) + 1;
+  if(navigator.vibrate) navigator.vibrate(15);
+  cerrarModal();
+  renderApp();
+  toast(`${talle}${color?' · '+color:''} agregado`, {icon:'🛒', duracion:1500});
+}
+function ajustarCantidadCarritoItem(id, talle, color, delta){
+  if(!talle){ agregarAlCarrito(id, delta); return; }
+  if(typeof carrito[id] !== 'object' || carrito[id] === null) carrito[id] = {};
+  const clave = claveVariante(talle, color);
+  carrito[id][clave] = (carrito[id][clave] || 0) + delta;
+  if(carrito[id][clave] <= 0) delete carrito[id][clave];
+  if(Object.keys(carrito[id]).length === 0) delete carrito[id];
+  renderApp();
+}
+// Si el item tiene talle, descuenta de esa variante puntual y recalcula el
+// stock total del producto a partir de la suma de variantes — así nunca se
+// desincroniza el total mostrado en Stock del detalle por talle.
+function descontarStockItem(p, it){
+  if(it.talle && p.variantes && p.variantes.length){
+    const va = p.variantes.find(v => v.talle===it.talle && (v.color||'')===(it.color||''));
+    if(va) va.stock = Math.max(0, va.stock - it.cantidad);
+    p.stock = p.variantes.reduce((s,v)=>s+(parseInt(v.stock)||0), 0);
+  } else {
+    p.stock = Math.max(0, p.stock - it.cantidad);
+  }
 }
 
 function agregarCombo(id, cantidad = 1){
@@ -3006,20 +3086,20 @@ function crearProductoDesdeEscaneo(){
 }
 
 function abrirModalCobrar(){
-  const items = Object.entries(carrito).filter(([,c])=>c>0).map(([id,c])=>({ p: state.productos.find(x=>x.id===id), c }));
+  const items = itemsDelCarrito().map(it => ({ ...it, p: state.productos.find(x=>x.id===it.productoId) })).filter(it=>it.p);
   const combosSel = Object.entries(carritoCombos).filter(([,c])=>c>0).map(([id,c])=>({ combo: state.combos.find(x=>x.id===id), c }));
-  const total = items.reduce((s,it)=>s+it.p.precio*it.c,0) + combosSel.reduce((s,it)=>s+it.combo.precio*it.c,0);
+  const total = items.reduce((s,it)=>s+it.p.precio*it.cantidad,0) + combosSel.reduce((s,it)=>s+it.combo.precio*it.c,0);
   abrirModal(`
     <div class="p-5">
       <div class="text-xl font-extrabold text-gray-900 mb-4">Confirmar venta</div>
       <div class="flex flex-col gap-3 max-h-56 overflow-y-auto mb-4">
         ${items.map(it => `
           <div class="flex items-center justify-between">
-            <span class="text-gray-700">${it.p.emoji} ${it.p.nombre}</span>
+            <span class="text-gray-700">${it.p.emoji} ${it.p.nombre}${it.talle?` <span class="text-gray-400">(${it.talle}${it.color?' · '+it.color:''})</span>`:''}</span>
             <div class="flex items-center gap-3">
-              <button onclick="agregarAlCarrito('${it.p.id}', -1); abrirModalCobrar();" class="tap w-9 h-9 rounded-full bg-gray-100 font-bold text-xl">−</button>
-              <span class="font-bold w-6 text-center">${it.c}</span>
-              <button onclick="agregarAlCarrito('${it.p.id}', 1); abrirModalCobrar();" class="tap w-9 h-9 rounded-full bg-gray-100 font-bold text-xl">+</button>
+              <button onclick="ajustarCantidadCarritoItem('${it.p.id}','${it.talle||''}','${(it.color||'').replace(/'/g,"\\'")}', -1); abrirModalCobrar();" class="tap w-9 h-9 rounded-full bg-gray-100 font-bold text-xl">−</button>
+              <span class="font-bold w-6 text-center">${it.cantidad}</span>
+              <button onclick="ajustarCantidadCarritoItem('${it.p.id}','${it.talle||''}','${(it.color||'').replace(/'/g,"\\'")}', 1); abrirModalCobrar();" class="tap w-9 h-9 rounded-full bg-gray-100 font-bold text-xl">+</button>
             </div>
           </div>`).join('')}
         ${combosSel.map(it => `
@@ -3117,9 +3197,9 @@ function actualizarVuelto(){
 }
 
 function elegirClienteFiado(){
-  const items = Object.entries(carrito).filter(([,c])=>c>0);
+  const items = itemsDelCarrito();
   const combosSel = Object.entries(carritoCombos).filter(([,c])=>c>0);
-  const total = items.reduce((s,[id,c]) => { const p = state.productos.find(x=>x.id===id); return s + p.precio*c; }, 0)
+  const total = items.reduce((s,it) => { const p = state.productos.find(x=>x.id===it.productoId); return s + p.precio*it.cantidad; }, 0)
               + combosSel.reduce((s,[id,c]) => { const cb = state.combos.find(x=>x.id===id); return s + cb.precio*c; }, 0);
   abrirModal(`
     <div class="p-5">
@@ -3165,7 +3245,7 @@ let facturarProximaVenta = false; // casillero "Facturar esta venta (AFIP)" del 
 // carrito mientras tanto. Lo mismo con "facturar": se congela si estaba
 // tildado en ese momento, no el estado actual del casillero.
 function confirmarVenta(metodo, clienteId = null, precapturado = null){
-  const items = precapturado ? precapturado.items : Object.entries(carrito).filter(([,c])=>c>0).map(([id,c])=>({ productoId:id, cantidad:c }));
+  const items = precapturado ? precapturado.items : itemsDelCarrito();
   const combosVendidos = precapturado ? precapturado.combos : Object.entries(carritoCombos).filter(([,c])=>c>0).map(([id,c])=>({ comboId:id, cantidad:c }));
   if(!items.length && !combosVendidos.length) return;
   const debeFacturar = precapturado ? !!precapturado.facturar : facturarProximaVenta;
@@ -3175,7 +3255,7 @@ function confirmarVenta(metodo, clienteId = null, precapturado = null){
     if(!p) return;
     total += p.precio * it.cantidad;
     ganancia += (p.precio - p.costo) * it.cantidad;
-    p.stock = Math.max(0, p.stock - it.cantidad);
+    descontarStockItem(p, it);
   });
   combosVendidos.forEach(cv => {
     const combo = state.combos.find(x=>x.id===cv.comboId);
@@ -3229,7 +3309,7 @@ const MP_API = 'https://api.mercadopago.com';
 // lento y empieza a cobrarle a otro por MercadoPago también.
 const _pollsMPActivos = new Map(); // idPago -> intervalId
 async function cobrarConMercadoPago(total){
-  const items = Object.entries(carrito).filter(([,c])=>c>0).map(([id,c])=>({ productoId:id, cantidad:c }));
+  const items = itemsDelCarrito();
   const combosVendidos = Object.entries(carritoCombos).filter(([,c])=>c>0).map(([id,c])=>({ comboId:id, cantidad:c }));
   if(!items.length && !combosVendidos.length) return;
   const token = state.negocio.mercadoPagoAccessToken;
@@ -3740,11 +3820,14 @@ function tarjetaProductoStock(p){
     </div>
     <div class="flex items-center justify-between">
       <span class="text-gray-500 font-semibold">Quedan: <span class="text-gray-900">${p.stock}</span></span>
-      <div class="flex items-center gap-2">
+      ${p.variantes && p.variantes.length
+        ? `<button onclick="mostrarFormProducto('${p.id}')" class="text-indigo-700 font-semibold text-sm">Ver talles →</button>`
+        : `<div class="flex items-center gap-2">
         <button onclick="ajustarStock('${p.id}',-1)" class="tap w-10 h-10 rounded-full bg-gray-100 font-bold text-xl">−</button>
         <button onclick="ajustarStock('${p.id}',1)" class="tap w-10 h-10 rounded-full bg-gray-100 font-bold text-xl">+</button>
-      </div>
+      </div>`}
     </div>
+    ${p.variantes && p.variantes.length ? `<div class="text-gray-400 text-xs mt-2">${p.variantes.map(va=>`${va.talle}${va.color?' '+va.color:''}: ${va.stock}`).join(' · ')}</div>` : ''}
   </div>`;
 }
 function ajustarStock(id, delta){
@@ -3893,20 +3976,30 @@ function eliminarCombo(id){
 }
 
 const UNIDADES_PRESENTACION = ['unidades','ml','L','g','kg','m','par'];
+const TALLES_COMUNES = ['XS','S','M','L','XL','XXL','Único'];
+const MARCAS_SUGERIDAS_ROPA = ["Levi's",'Nike','Adidas','Puma','Topper','Kosiuko','Rip Curl','Vans','Reebok','Wrangler','Lee','Converse','Under Armour','Zara','H&M'];
+let _variantesEnEdicion = [];
 function mostrarFormProducto(id = null, override = null){
   const p = id ? state.productos.find(x=>x.id===id) : null;
-  const v = { emoji:'🛒', imagen:'', nombre:'', marca:'', contenidoCantidad:1, contenidoUnidad:'unidades', categoriaId:'', proveedorId:'', precio:'', costo:'', stock:'', stockMin:5, vencimiento:'', temporada:'', codigoBarras:'', ...(p||{}), ...(override||{}) };
+  const v = { emoji:'🛒', imagen:'', nombre:'', marca:'', contenidoCantidad:1, contenidoUnidad:'unidades', categoriaId:'', proveedorId:'', precio:'', costo:'', stock:'', stockMin:5, vencimiento:'', temporada:'', codigoBarras:'', variantes:[], ...(p||{}), ...(override||{}) };
+  _variantesEnEdicion = v.variantes || [];
+  const ropa = esRubroRopa();
+  const stockTotalVariantes = _variantesEnEdicion.reduce((s,x)=>s+(parseInt(x.stock)||0), 0);
   abrirModal(`
     <div class="p-5">
       <div class="text-xl font-extrabold text-gray-900 mb-4">${p ? 'Editar producto' : 'Nuevo producto'}</div>
       <input type="hidden" id="pf-imagen" value="${v.imagen}" />
       ${v.imagen ? `<div class="flex items-center gap-2 mb-3 text-emerald-700 text-sm font-semibold"><img src="${v.imagen}" class="w-10 h-10 rounded-lg object-cover" /> Tiene foto real del producto</div>` : ''}
-      <div class="grid grid-cols-4 gap-2 mb-3">
+      <div class="grid grid-cols-4 gap-2 mb-1">
         <input id="pf-emoji" value="${v.emoji}" class="col-span-1 border-2 border-gray-200 rounded-2xl px-2 py-3 text-2xl text-center" />
         <input id="pf-nombre" value="${v.nombre}" placeholder="Nombre del producto" class="col-span-3 border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg" />
       </div>
+      <input type="file" accept="image/*" capture="environment" id="pf-input-foto" style="display:none" onchange="capturarFotoProducto(event, '${id||''}')" />
+      <button onclick="document.getElementById('pf-input-foto').click()" class="tap w-full bg-white border-2 border-gray-200 text-gray-600 font-semibold py-2.5 rounded-xl text-sm mb-3 flex items-center justify-center gap-2">📷 ${v.imagen ? 'Cambiar foto' : 'Sacar foto (opcional, si no alcanza el emoji)'}</button>
       <label class="font-semibold text-gray-600">Marca (opcional)</label>
-      <input id="pf-marca" value="${v.marca}" placeholder="Ej: La Serenísima" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2" />
+      <input id="pf-marca" value="${v.marca}" list="pf-marcas-sugeridas" placeholder="${ropa ? "Ej: Levi's" : 'Ej: La Serenísima'}" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2" />
+      ${ropa ? `<datalist id="pf-marcas-sugeridas">${MARCAS_SUGERIDAS_ROPA.map(m=>`<option value="${m}">`).join('')}</datalist>` : ''}
+      ${!ropa ? `
       <label class="font-semibold text-gray-600">Presentación</label>
       <div class="grid grid-cols-2 gap-2 my-2">
         <input id="pf-contenido-cant" type="number" inputmode="decimal" value="${v.contenidoCantidad}" placeholder="Cantidad" class="border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg" />
@@ -3914,6 +4007,7 @@ function mostrarFormProducto(id = null, override = null){
           ${UNIDADES_PRESENTACION.map(u=>`<option value="${u}" ${v.contenidoUnidad===u?'selected':''}>${u}</option>`).join('')}
         </select>
       </div>
+      ` : ''}
       <label class="font-semibold text-gray-600">Categoría (opcional)</label>
       <select id="pf-categoria" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2">
         <option value="">Sin categoría</option>
@@ -3933,11 +4027,39 @@ function mostrarFormProducto(id = null, override = null){
       <input id="pf-precio" type="number" inputmode="decimal" value="${v.precio}" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2" />
       <label class="font-semibold text-gray-600">Costo (lo que pagás vos)</label>
       <input id="pf-costo" type="number" inputmode="decimal" value="${v.costo}" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2" />
+      ${ropa ? `
+      <label class="font-semibold text-gray-600">Talles y colores (opcional)</label>
+      <div class="text-gray-400 text-xs mb-2">Si cargás talles, el stock total se suma solo. Si no cargás ninguno, usá el campo de stock de más abajo (por ejemplo, para un accesorio de talle único).</div>
+      ${_variantesEnEdicion.length ? `
+      <div class="flex flex-col gap-2 mb-2">
+        ${_variantesEnEdicion.map((va,i) => `
+          <div class="flex items-center justify-between bg-gray-50 rounded-xl px-3 py-2">
+            <span class="font-semibold text-gray-700">${va.talle}${va.color?' · '+va.color:''}</span>
+            <span class="flex items-center gap-3">
+              <span class="text-gray-500 text-sm">Stock: ${va.stock}</span>
+              <button onclick="quitarVarianteFormProducto('${id||''}', ${i})" class="tap text-red-500 font-bold px-1">✕</button>
+            </span>
+          </div>
+        `).join('')}
+      </div>` : ''}
+      <div class="grid grid-cols-4 gap-2 mb-2">
+        <select id="pf-nueva-talle" class="col-span-1 border-2 border-gray-200 rounded-xl px-1 py-2.5 text-sm">
+          ${TALLES_COMUNES.map(t=>`<option value="${t}">${t}</option>`).join('')}
+        </select>
+        <input id="pf-nuevo-color" placeholder="Color (opc.)" class="col-span-2 border-2 border-gray-200 rounded-xl px-2 py-2.5 text-sm" />
+        <input id="pf-nuevo-stock" type="number" inputmode="numeric" placeholder="Stock" class="col-span-1 border-2 border-gray-200 rounded-xl px-2 py-2.5 text-sm" />
+      </div>
+      <button onclick="agregarVarianteFormProducto('${id||''}')" class="tap w-full bg-white border-2 border-dashed border-indigo-200 text-indigo-700 font-bold py-2.5 rounded-xl text-sm mb-3">+ Agregar talle</button>
+      ` : ''}
+      ${(!ropa || !_variantesEnEdicion.length) ? `
       <label class="font-semibold text-gray-600">Stock actual</label>
       <input id="pf-stock" type="number" inputmode="numeric" value="${v.stock}" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2" />
+      ` : `
+      <div class="text-gray-600 text-sm mb-2">Stock actual (suma de talles): <b>${stockTotalVariantes}</b></div>
+      `}
       <label class="font-semibold text-gray-600">Avisarme cuando quede menos de</label>
       <input id="pf-stockmin" type="number" inputmode="numeric" value="${v.stockMin}" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2" />
-      ${esRubroRopa() ? `
+      ${ropa ? `
       <label class="font-semibold text-gray-600">Temporada (opcional)</label>
       <select id="pf-temporada" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2 mb-4">
         <option value="">Todo el año</option>
@@ -3952,39 +4074,86 @@ function mostrarFormProducto(id = null, override = null){
     </div>
   `);
 }
-function escanearParaFormProducto(id){
-  const valores = {
+// Junta los valores actuales de todos los campos del formulario, para poder
+// re-renderizarlo (foto nueva, talle agregado, código escaneado) sin perder
+// lo que el dueño ya había tipeado en los demás campos.
+function capturarValoresFormProducto(){
+  return {
     emoji: document.getElementById('pf-emoji').value,
+    imagen: document.getElementById('pf-imagen').value,
     nombre: document.getElementById('pf-nombre').value,
     marca: document.getElementById('pf-marca').value,
-    contenidoCantidad: document.getElementById('pf-contenido-cant').value,
-    contenidoUnidad: document.getElementById('pf-contenido-unidad').value,
+    contenidoCantidad: document.getElementById('pf-contenido-cant') ? document.getElementById('pf-contenido-cant').value : 1,
+    contenidoUnidad: document.getElementById('pf-contenido-unidad') ? document.getElementById('pf-contenido-unidad').value : 'unidades',
     categoriaId: document.getElementById('pf-categoria').value,
     proveedorId: document.getElementById('pf-proveedor').value,
+    codigoBarras: document.getElementById('pf-codigo-barras').value,
     precio: document.getElementById('pf-precio').value,
     costo: document.getElementById('pf-costo').value,
-    stock: document.getElementById('pf-stock').value,
+    stock: document.getElementById('pf-stock') ? document.getElementById('pf-stock').value : '',
     stockMin: document.getElementById('pf-stockmin').value,
     vencimiento: document.getElementById('pf-vencimiento') ? document.getElementById('pf-vencimiento').value : '',
     temporada: document.getElementById('pf-temporada') ? document.getElementById('pf-temporada').value : '',
+    variantes: _variantesEnEdicion,
   };
+}
+function escanearParaFormProducto(id){
+  const valores = capturarValoresFormProducto();
   iniciarEscaneo((codigo) => {
     valores.codigoBarras = codigo;
     mostrarFormProducto(id || null, valores);
     toast('Código escaneado', { icon:'📷' });
   });
 }
+// Comprimida a 400px de ancho y JPEG al 60%: una foto de celular normal pesa
+// varios MB, así queda en unos 30-80kb, liviana para el catálogo público y
+// muy por debajo del límite de 1MB por documento de Firestore.
+function capturarFotoProducto(event, id){
+  const file = event.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const img = new Image();
+    img.onload = () => {
+      const maxAncho = 400;
+      const escala = Math.min(1, maxAncho / img.width);
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(img.width * escala);
+      canvas.height = Math.round(img.height * escala);
+      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
+      mostrarFormProducto(id || null, { ...capturarValoresFormProducto(), imagen: dataUrl });
+      toast('Foto agregada', { icon:'📷' });
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+function agregarVarianteFormProducto(id){
+  const talle = document.getElementById('pf-nueva-talle').value;
+  const color = document.getElementById('pf-nuevo-color').value.trim();
+  const stock = parseInt(document.getElementById('pf-nuevo-stock').value) || 0;
+  _variantesEnEdicion = [..._variantesEnEdicion, { talle, color, stock }];
+  mostrarFormProducto(id || null, { ...capturarValoresFormProducto(), variantes: _variantesEnEdicion });
+}
+function quitarVarianteFormProducto(id, index){
+  _variantesEnEdicion = _variantesEnEdicion.filter((_,i) => i!==index);
+  mostrarFormProducto(id || null, { ...capturarValoresFormProducto(), variantes: _variantesEnEdicion });
+}
 function guardarProducto(id){
   const nombre = document.getElementById('pf-nombre').value.trim();
   const marca = document.getElementById('pf-marca').value.trim();
-  const contenidoCantidad = parseFloat(document.getElementById('pf-contenido-cant').value) || 1;
-  const contenidoUnidad = document.getElementById('pf-contenido-unidad').value;
+  const ropa = esRubroRopa();
+  const contenidoCantidad = ropa ? 1 : (parseFloat(document.getElementById('pf-contenido-cant').value) || 1);
+  const contenidoUnidad = ropa ? 'unidades' : document.getElementById('pf-contenido-unidad').value;
   const categoriaId = document.getElementById('pf-categoria').value;
   const proveedorId = document.getElementById('pf-proveedor').value;
   const codigoBarras = document.getElementById('pf-codigo-barras').value.trim();
   const precio = parseFloat(document.getElementById('pf-precio').value) || 0;
   const costo = parseFloat(document.getElementById('pf-costo').value) || 0;
-  const stock = parseInt(document.getElementById('pf-stock').value) || 0;
+  const variantes = ropa ? _variantesEnEdicion : [];
+  const stockEl = document.getElementById('pf-stock');
+  const stock = variantes.length ? variantes.reduce((s,x)=>s+(parseInt(x.stock)||0),0) : (parseInt(stockEl ? stockEl.value : 0) || 0);
   const stockMin = parseInt(document.getElementById('pf-stockmin').value) || 0;
   const vencimiento = document.getElementById('pf-vencimiento') ? document.getElementById('pf-vencimiento').value || '' : '';
   const temporada = document.getElementById('pf-temporada') ? document.getElementById('pf-temporada').value || '' : '';
@@ -3994,9 +4163,9 @@ function guardarProducto(id){
   if(!nombre){ toast('Escribí el nombre del producto', {icon:'✍️'}); return; }
   if(id){
     const p = state.productos.find(x=>x.id===id);
-    Object.assign(p, { nombre, marca, contenidoCantidad, contenidoUnidad, categoriaId, proveedorId, codigoBarras, precio, costo, stock, stockMin, vencimiento, temporada, emoji, imagen });
+    Object.assign(p, { nombre, marca, contenidoCantidad, contenidoUnidad, categoriaId, proveedorId, codigoBarras, precio, costo, stock, stockMin, vencimiento, temporada, emoji, imagen, variantes });
   } else {
-    state.productos.push({ id: uid(), nombre, marca, contenidoCantidad, contenidoUnidad, categoriaId, proveedorId, codigoBarras, precio, costo, stock, stockMin, vencimiento, temporada, emoji, imagen });
+    state.productos.push({ id: uid(), nombre, marca, contenidoCantidad, contenidoUnidad, categoriaId, proveedorId, codigoBarras, precio, costo, stock, stockMin, vencimiento, temporada, emoji, imagen, variantes });
   }
   guardar();
   cerrarModal();
@@ -5218,7 +5387,8 @@ function verDetalleVenta(id){
   if(!venta) return;
   const items = venta.items.map(it => {
     const p = state.productos.find(x=>x.id===it.productoId);
-    return { nombre: p ? p.nombre : '(producto eliminado)', emoji: p ? p.emoji : '❔', cantidad: it.cantidad };
+    const nombreBase = p ? p.nombre : '(producto eliminado)';
+    return { nombre: it.talle ? `${nombreBase} (${it.talle}${it.color?' · '+it.color:''})` : nombreBase, emoji: p ? p.emoji : '❔', cantidad: it.cantidad };
   });
   const combos = (venta.combos||[]).map(cv => {
     const c = state.combos.find(x=>x.id===cv.comboId);
@@ -5246,7 +5416,8 @@ function imprimirComprobante(id){
   if(!venta) return;
   const items = venta.items.map(it => {
     const p = state.productos.find(x=>x.id===it.productoId);
-    return { nombre: p ? p.nombre : '(producto eliminado)', cantidad: it.cantidad, precio: p ? p.precio : 0 };
+    const nombreBase = p ? p.nombre : '(producto eliminado)';
+    return { nombre: it.talle ? `${nombreBase} (${it.talle}${it.color?' · '+it.color:''})` : nombreBase, cantidad: it.cantidad, precio: p ? p.precio : 0 };
   });
   const combos = (venta.combos||[]).map(cv => {
     const c = state.combos.find(x=>x.id===cv.comboId);
