@@ -5843,6 +5843,7 @@ function vistaConfig(){
         <button onclick="cambiarRubroDemo('${t}')" class="tap py-3 rounded-2xl font-bold border-2 ${state.negocio.tipo===t?'bg-indigo-700 text-white border-indigo-700':'bg-white text-gray-600 border-gray-200'}">${nombreRubro(t)}</button>
       `).join('')}
     </div>
+    <button onclick="cambiarRubroDemo('otro','Personalizado')" class="tap w-full text-gray-400 hover:text-gray-600 font-semibold text-xs py-1.5 mb-2">Personalizado (stock vacío)</button>
     <div class="text-gray-400 text-xs -mt-1 mb-2">Solo en modo demo: cambiar el rubro reemplaza los productos de ejemplo por los de ese rubro, para mostrarle a otros comercios cómo se vería la app. Se borran las ventas/clientes/pedidos de la demo actual.</div>
     ` : `
     <div class="w-full bg-gray-50 border-2 border-gray-100 rounded-2xl px-4 py-3 text-lg my-2 text-gray-500">${nombreRubro(state.negocio.tipo)} <span class="text-sm">(no se puede cambiar)</span></div>
@@ -6060,10 +6061,11 @@ function guardarFidelizacion(){
 // prueba para mostrarle a un comercio de otro rubro cómo se vería la app con
 // sus propios productos. Para un negocio real esto no aparece (el rubro
 // queda fijo, ver vistaConfig) porque mezclar rubros no tiene sentido ahí.
-function cambiarRubroDemo(tipo){
+function cambiarRubroDemo(tipo, etiqueta){
   if(!(esAdminActual() && modoDemoAdmin)) return;
+  etiqueta = etiqueta || nombreRubro(tipo);
   if(tipo === state.negocio.tipo) return;
-  confirmarAccion(`¿Cambiar la demo a "${nombreRubro(tipo)}"? Se van a reemplazar los productos de ejemplo por los de ese rubro, y se van a borrar las ventas/clientes/pedidos de la demo actual.`, () => {
+  confirmarAccion(`¿Cambiar la demo a "${etiqueta}"? Se van a reemplazar los productos de ejemplo por los de ese rubro, y se van a borrar las ventas/clientes/pedidos de la demo actual.`, () => {
     const nombre = state.negocio.nombre;
     const tamanoLetra = state.tamanoLetra;
     state = estadoVacio();
@@ -6074,8 +6076,8 @@ function cambiarRubroDemo(tipo){
     cerrarModal();
     ir('#/inicio');
     renderApp();
-    toast(`Demo cambiada a ${nombreRubro(tipo)}`, {icon:'🔄'});
-  }, `Sí, cambiar a ${nombreRubro(tipo)}`);
+    toast(`Demo cambiada a ${etiqueta}`, {icon:'🔄'});
+  }, `Sí, cambiar a ${etiqueta}`);
 }
 
 /* ---- Catálogo público ---- */
