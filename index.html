@@ -683,6 +683,88 @@ function crearProductosSeed(tipo){
   }));
 }
 
+// Catálogo de ropa más grande y variado que el de SEEDS.ropa (que es chico
+// a propósito, para el onboarding normal). Este es solo para la demo del
+// admin ("Personalizado"), con talles/colores reales usando el sistema de
+// variantes — así se ve la app tal cual la vería un local de indumentaria
+// de verdad, no un ejemplo pelado.
+const SEEDS_PERSONALIZADO = [
+  { nombre:'Remera básica algodón', emoji:'👕', marca:'', precio:9000, costo:5000, stockMin:4,
+    variantes:[{talle:'S',color:'Blanco',stock:6},{talle:'M',color:'Blanco',stock:8},{talle:'L',color:'Blanco',stock:6},{talle:'M',color:'Negro',stock:7},{talle:'L',color:'Negro',stock:5}] },
+  { nombre:'Remera estampada', emoji:'👕', marca:'', precio:10500, costo:6000, stockMin:3,
+    variantes:[{talle:'S',color:'',stock:4},{talle:'M',color:'',stock:6},{talle:'L',color:'',stock:4}] },
+  { nombre:'Musculosa deportiva', emoji:'🎽', marca:'', precio:6500, costo:3500, stockMin:3,
+    variantes:[{talle:'S',color:'',stock:5},{talle:'M',color:'',stock:6},{talle:'L',color:'',stock:4}] },
+  { nombre:'Buzo canguro', emoji:'🧥', marca:'', precio:22000, costo:13000, stockMin:3, temporada:'Invierno',
+    variantes:[{talle:'S',color:'Gris',stock:3},{talle:'M',color:'Gris',stock:5},{talle:'L',color:'Gris',stock:4},{talle:'XL',color:'Gris',stock:2}] },
+  { nombre:'Buzo cuello redondo', emoji:'🧶', marca:'', precio:19000, costo:11000, stockMin:3, temporada:'Invierno',
+    variantes:[{talle:'S',color:'',stock:4},{talle:'M',color:'',stock:5},{talle:'L',color:'',stock:3}] },
+  { nombre:'Campera de abrigo', emoji:'🧥', marca:'', precio:38000, costo:24000, stockMin:2, temporada:'Invierno',
+    variantes:[{talle:'S',color:'Negro',stock:2},{talle:'M',color:'Negro',stock:4},{talle:'L',color:'Negro',stock:3},{talle:'XL',color:'Negro',stock:2}] },
+  { nombre:'Campera rompeviento', emoji:'🧥', marca:'', precio:27000, costo:16000, stockMin:2, temporada:'Otoño',
+    variantes:[{talle:'M',color:'',stock:3},{talle:'L',color:'',stock:4},{talle:'XL',color:'',stock:2}] },
+  { nombre:'Camisa manga larga', emoji:'👔', marca:'', precio:17000, costo:10000, stockMin:3,
+    variantes:[{talle:'S',color:'',stock:3},{talle:'M',color:'',stock:5},{talle:'L',color:'',stock:4},{talle:'XL',color:'',stock:2}] },
+  { nombre:'Chomba', emoji:'👕', marca:'', precio:15000, costo:9000, stockMin:3,
+    variantes:[{talle:'S',color:'',stock:4},{talle:'M',color:'',stock:6},{talle:'L',color:'',stock:4},{talle:'XL',color:'',stock:2}] },
+  { nombre:'Pantalón jean', emoji:'👖', marca:'', precio:26000, costo:16000, stockMin:3,
+    variantes:[{talle:'38',color:'',stock:3},{talle:'40',color:'',stock:5},{talle:'42',color:'',stock:4},{talle:'44',color:'',stock:2}] },
+  { nombre:'Pantalón jogger', emoji:'👖', marca:'', precio:18000, costo:10500, stockMin:3,
+    variantes:[{talle:'S',color:'',stock:4},{talle:'M',color:'',stock:5},{talle:'L',color:'',stock:3}] },
+  { nombre:'Short deportivo', emoji:'🩳', marca:'', precio:9500, costo:5500, stockMin:3, temporada:'Verano',
+    variantes:[{talle:'S',color:'',stock:5},{talle:'M',color:'',stock:6},{talle:'L',color:'',stock:4}] },
+  { nombre:'Bermuda jean', emoji:'🩳', marca:'', precio:16000, costo:9500, stockMin:3, temporada:'Verano',
+    variantes:[{talle:'38',color:'',stock:3},{talle:'40',color:'',stock:4},{talle:'42',color:'',stock:3}] },
+  { nombre:'Vestido casual', emoji:'👗', marca:'', precio:24000, costo:14000, stockMin:2, temporada:'Primavera',
+    variantes:[{talle:'S',color:'',stock:3},{talle:'M',color:'',stock:4},{talle:'L',color:'',stock:2}] },
+  { nombre:'Pollera', emoji:'👗', marca:'', precio:14000, costo:8000, stockMin:2, temporada:'Verano',
+    variantes:[{talle:'S',color:'',stock:3},{talle:'M',color:'',stock:4},{talle:'L',color:'',stock:2}] },
+  { nombre:'Zapatillas urbanas', emoji:'👟', marca:'', precio:48000, costo:30000, stockMin:2,
+    variantes:[{talle:'38',color:'Blanco',stock:2},{talle:'39',color:'Blanco',stock:3},{talle:'40',color:'Blanco',stock:4},{talle:'41',color:'Blanco',stock:3},{talle:'42',color:'Blanco',stock:3},{talle:'43',color:'Blanco',stock:2}] },
+  { nombre:'Zapatillas deportivas', emoji:'👟', marca:'', precio:52000, costo:33000, stockMin:2,
+    variantes:[{talle:'38',color:'Negro',stock:2},{talle:'39',color:'Negro',stock:3},{talle:'40',color:'Negro',stock:3},{talle:'41',color:'Negro',stock:3},{talle:'42',color:'Negro',stock:2}] },
+  { nombre:'Zapatillas running', emoji:'👟', marca:'', precio:58000, costo:37000, stockMin:2,
+    variantes:[{talle:'39',color:'',stock:2},{talle:'40',color:'',stock:3},{talle:'41',color:'',stock:3},{talle:'42',color:'',stock:2},{talle:'43',color:'',stock:1}] },
+  { nombre:'Ojotas', emoji:'🩴', marca:'', precio:8000, costo:4500, stockMin:3, temporada:'Verano',
+    variantes:[{talle:'37',color:'',stock:3},{talle:'38',color:'',stock:4},{talle:'39',color:'',stock:4},{talle:'40',color:'',stock:4},{talle:'41',color:'',stock:3},{talle:'42',color:'',stock:2}] },
+  { nombre:'Medias (pack x3)', emoji:'🧦', marca:'', precio:4500, costo:2500, stockMin:5,
+    variantes:[{talle:'Único',color:'',stock:20}] },
+  { nombre:'Boxer', emoji:'🩲', marca:'', precio:5500, costo:3000, stockMin:4,
+    variantes:[{talle:'S',color:'',stock:6},{talle:'M',color:'',stock:8},{talle:'L',color:'',stock:6},{talle:'XL',color:'',stock:3}] },
+  { nombre:'Calzoncillo', emoji:'🩲', marca:'', precio:4800, costo:2600, stockMin:4,
+    variantes:[{talle:'S',color:'',stock:5},{talle:'M',color:'',stock:6},{talle:'L',color:'',stock:4}] },
+  { nombre:'Bombacha (pack x3)', emoji:'🩲', marca:'', precio:5200, costo:2800, stockMin:4,
+    variantes:[{talle:'S',color:'',stock:6},{talle:'M',color:'',stock:7},{talle:'L',color:'',stock:5}] },
+  { nombre:'Corpiño', emoji:'👙', marca:'', precio:9800, costo:5500, stockMin:3,
+    variantes:[{talle:'85',color:'',stock:4},{talle:'90',color:'',stock:5},{talle:'95',color:'',stock:3}] },
+  { nombre:'Bikini', emoji:'👙', marca:'', precio:13500, costo:7500, stockMin:2, temporada:'Verano',
+    variantes:[{talle:'S',color:'',stock:3},{talle:'M',color:'',stock:4},{talle:'L',color:'',stock:2}] },
+  { nombre:'Gorra', emoji:'🧢', marca:'', precio:8500, costo:4500, stockMin:3,
+    variantes:[{talle:'Único',color:'',stock:15}] },
+  { nombre:'Cinturón de cuero', emoji:'👔', marca:'', precio:9000, costo:5000, stockMin:3,
+    variantes:[{talle:'Único',color:'',stock:12}] },
+  { nombre:'Bufanda', emoji:'🧣', marca:'', precio:7500, costo:4000, stockMin:3, temporada:'Invierno',
+    variantes:[{talle:'Único',color:'',stock:10}] },
+  { nombre:'Guantes', emoji:'🧤', marca:'', precio:6000, costo:3200, stockMin:3, temporada:'Invierno',
+    variantes:[{talle:'Único',color:'',stock:10}] },
+  { nombre:'Mochila', emoji:'🎒', marca:'', precio:28000, costo:17000, stockMin:2,
+    variantes:[{talle:'Único',color:'',stock:8}] },
+];
+function crearProductosPersonalizado(){
+  return SEEDS_PERSONALIZADO.map(s => {
+    const variantes = (s.variantes||[]).map(v => ({ talle:v.talle, color:v.color||'', stock:v.stock }));
+    const stock = variantes.reduce((acc,v)=>acc+(parseInt(v.stock)||0), 0);
+    return {
+      id: uid(), nombre: s.nombre, emoji: s.emoji, marca: s.marca||'', imagen:'',
+      contenidoCantidad: 1, contenidoUnidad: 'unidades',
+      categoriaId: '', proveedorId: '', codigoBarras: '',
+      precio: s.precio, costo: s.costo, stock, stockMin: s.stockMin||3,
+      vencimiento: '', temporada: s.temporada || '',
+      variantes
+    };
+  });
+}
+
 /* ====================== CATÁLOGO COMPLETO (importar de una) ======================
    Catálogo de productos comunes en almacenes/despensas argentinas, organizado por
    categoría, para que un negocio nuevo no tenga que cargar todo a mano. Los precios
@@ -5843,7 +5925,7 @@ function vistaConfig(){
         <button onclick="cambiarRubroDemo('${t}')" class="tap py-3 rounded-2xl font-bold border-2 ${state.negocio.tipo===t?'bg-indigo-700 text-white border-indigo-700':'bg-white text-gray-600 border-gray-200'}">${nombreRubro(t)}</button>
       `).join('')}
     </div>
-    <button onclick="cambiarRubroDemo('otro','Personalizado')" class="tap w-full text-gray-400 hover:text-gray-600 font-semibold text-xs py-1.5 mb-2">Personalizado (stock vacío)</button>
+    <button onclick="cambiarRubroPersonalizado()" class="tap w-full text-gray-400 hover:text-gray-600 font-semibold text-xs py-1.5 mb-2">Personalizado (30 productos variados)</button>
     <div class="text-gray-400 text-xs -mt-1 mb-2">Solo en modo demo: cambiar el rubro reemplaza los productos de ejemplo por los de ese rubro, para mostrarle a otros comercios cómo se vería la app. Se borran las ventas/clientes/pedidos de la demo actual.</div>
     ` : `
     <div class="w-full bg-gray-50 border-2 border-gray-100 rounded-2xl px-4 py-3 text-lg my-2 text-gray-500">${nombreRubro(state.negocio.tipo)} <span class="text-sm">(no se puede cambiar)</span></div>
@@ -6078,6 +6160,25 @@ function cambiarRubroDemo(tipo, etiqueta){
     renderApp();
     toast(`Demo cambiada a ${etiqueta}`, {icon:'🔄'});
   }, `Sí, cambiar a ${etiqueta}`);
+}
+// Rubro "ropa" pero con un catálogo bastante más grande y variado (30
+// productos con talles reales) que los 10 de siempre, para mostrarle a un
+// local de indumentaria un ejemplo más parecido a su stock real.
+function cambiarRubroPersonalizado(){
+  if(!(esAdminActual() && modoDemoAdmin)) return;
+  confirmarAccion('¿Cambiar la demo a un catálogo de ropa más completo (30 productos variados, con talles y colores)? Se van a borrar las ventas/clientes/pedidos de la demo actual.', () => {
+    const nombre = state.negocio.nombre;
+    const tamanoLetra = state.tamanoLetra;
+    state = estadoVacio();
+    state.tamanoLetra = tamanoLetra;
+    state.negocio = { nombre, tipo: 'ropa' };
+    state.productos = crearProductosPersonalizado();
+    guardar();
+    cerrarModal();
+    ir('#/inicio');
+    renderApp();
+    toast('Demo cambiada a catálogo personalizado', {icon:'🔄'});
+  }, 'Sí, cambiar');
 }
 
 /* ---- Catálogo público ---- */
