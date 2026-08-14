@@ -5933,6 +5933,7 @@ function vistaConfig(){
     <div class="text-gray-400 text-xs mt-3">Este token solo se guarda en tu cuenta (nadie más lo puede ver) y se usa directo desde tu celular/compu para hablar con MercadoPago, sin pasar por ningún servidor intermedio. Ojo: si en algún momento entrás a las herramientas de desarrollador de tu propio navegador, ahí sí se podría ver — como con cualquier dato tuyo que la app maneja.</div>
   </div>
 
+  ${esAdminActual() ? `
   <div class="card p-4 mb-4">
     <div class="font-bold text-gray-700 mb-1 text-lg">🧾 Facturación electrónica (AFIP)</div>
     <div class="text-gray-500 text-sm mb-3">Por ahora solo Factura C (monotributista) a Consumidor Final. Hace falta tener un certificado digital dado de alta en AFIP a nombre de tu CUIT — la app te ayuda a generarlo, no hace falta instalar nada ni saber de esto.</div>
@@ -5956,6 +5957,7 @@ function vistaConfig(){
     <button onclick="guardarConfigAfip()" class="tap w-full bg-white border-2 border-gray-200 text-gray-700 font-bold py-3 rounded-2xl">Guardar</button>
     ${state.negocio.afip?.certificado ? `<div class="text-emerald-600 text-sm font-semibold mt-2 text-center">✅ Configurado — ya aparece la opción en la Caja</div>` : ''}
   </div>
+  ` : ''}
 
   <div class="card p-4 mb-4">
     <div class="font-bold text-gray-700 mb-1 text-lg">📧 Comprobante por email</div>
