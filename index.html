@@ -4144,7 +4144,10 @@ function eliminarCombo(id){
 }
 
 const UNIDADES_PRESENTACION = ['unidades','ml','L','g','kg','m','par'];
-const TALLES_COMUNES = ['XS','S','M','L','XL','XXL','Único'];
+// Son solo sugerencias (datalist): el campo de talle es de texto libre, así
+// que también se puede escribir cualquier otro talle a mano (de zapatillas,
+// de bebé, etc.) aunque no esté en esta lista.
+const TALLES_COMUNES = ['XS','S','M','L','XL','XXL','Único','35','36','37','38','39','40','41','42','43','44','45'];
 const MARCAS_SUGERIDAS_ROPA = ["Levi's",'Nike','Adidas','Puma','Topper','Kosiuko','Rip Curl','Vans','Reebok','Wrangler','Lee','Converse','Under Armour','Zara','H&M'];
 let _variantesEnEdicion = [];
 function mostrarFormProducto(id = null, override = null){
@@ -4209,12 +4212,11 @@ function mostrarFormProducto(id = null, override = null){
         `).join('')}
       </div>` : ''}
       <div class="grid grid-cols-4 gap-2 mb-2">
-        <select id="pf-nueva-talle" class="col-span-1 border-2 border-gray-200 rounded-xl px-1 py-2.5 text-sm">
-          ${TALLES_COMUNES.map(t=>`<option value="${t}">${t}</option>`).join('')}
-        </select>
+        <input id="pf-nueva-talle" list="pf-talles-sugeridos" placeholder="Talle" class="col-span-1 border-2 border-gray-200 rounded-xl px-2 py-2.5 text-sm" />
         <input id="pf-nuevo-color" placeholder="Color (opc.)" class="col-span-2 border-2 border-gray-200 rounded-xl px-2 py-2.5 text-sm" />
         <input id="pf-nuevo-stock" type="number" inputmode="numeric" placeholder="Stock" class="col-span-1 border-2 border-gray-200 rounded-xl px-2 py-2.5 text-sm" />
       </div>
+      <datalist id="pf-talles-sugeridos">${TALLES_COMUNES.map(t=>`<option value="${t}">`).join('')}</datalist>
       <button onclick="agregarVarianteFormProducto('${id||''}')" class="tap w-full bg-white border-2 border-dashed border-indigo-200 text-indigo-700 font-bold py-2.5 rounded-xl text-sm mb-3">+ Agregar talle</button>
       ` : ''}
       ${(!ropa || !_variantesEnEdicion.length) ? `
