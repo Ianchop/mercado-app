@@ -5324,7 +5324,16 @@ function vistaConfig(){
     <label class="font-semibold text-gray-600">Nombre</label>
     <input id="cfg-nombre" value="${state.negocio.nombre}" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2" />
     <label class="font-semibold text-gray-600">Rubro</label>
+    ${(esAdminActual() && modoDemoAdmin) ? `
+    <div class="grid grid-cols-2 gap-2 my-2">
+      ${['mercado','ropa','bazar','otro'].map(t => `
+        <button onclick="cambiarRubroDemo('${t}')" class="tap py-3 rounded-2xl font-bold border-2 ${state.negocio.tipo===t?'bg-indigo-700 text-white border-indigo-700':'bg-white text-gray-600 border-gray-200'}">${nombreRubro(t)}</button>
+      `).join('')}
+    </div>
+    <div class="text-gray-400 text-xs -mt-1 mb-2">Solo en modo demo: cambiar el rubro reemplaza los productos de ejemplo por los de ese rubro, para mostrarle a otros comercios cómo se vería la app. Se borran las ventas/clientes/pedidos de la demo actual.</div>
+    ` : `
     <div class="w-full bg-gray-50 border-2 border-gray-100 rounded-2xl px-4 py-3 text-lg my-2 text-gray-500">${nombreRubro(state.negocio.tipo)} <span class="text-sm">(no se puede cambiar)</span></div>
+    `}
     <label class="font-semibold text-gray-600">Meta de venta diaria (opcional)</label>
     <input id="cfg-meta" type="number" inputmode="decimal" value="${state.metaDiaria||''}" placeholder="Ej: 50000" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2" />
     <label class="font-semibold text-gray-600">WhatsApp del negocio (opcional)</label>
@@ -5456,6 +5465,27 @@ function guardarConfig(){
   guardar();
   renderApp();
   toast('Datos guardados', {icon:'✅'});
+}
+// Solo para el admin en modo demo: le deja cambiar el rubro del negocio de
+// prueba para mostrarle a un comercio de otro rubro cómo se vería la app con
+// sus propios productos. Para un negocio real esto no aparece (el rubro
+// queda fijo, ver vistaConfig) porque mezclar rubros no tiene sentido ahí.
+function cambiarRubroDemo(tipo){
+  if(!(esAdminActual() && modoDemoAdmin)) return;
+  if(tipo === state.negocio.tipo) return;
+  confirmarAccion(`¿Cambiar la demo a "${nombreRubro(tipo)}"? Se van a reemplazar los productos de ejemplo por los de ese rubro, y se van a borrar las ventas/clientes/pedidos de la demo actual.`, () => {
+    const nombre = state.negocio.nombre;
+    const tamanoLetra = state.tamanoLetra;
+    state = estadoVacio();
+    state.tamanoLetra = tamanoLetra;
+    state.negocio = { nombre, tipo };
+    state.productos = crearProductosSeed(tipo);
+    guardar();
+    cerrarModal();
+    ir('#/inicio');
+    renderApp();
+    toast(`Demo cambiada a ${nombreRubro(tipo)}`, {icon:'🔄'});
+  }, `Sí, cambiar a ${nombreRubro(tipo)}`);
 }
 
 /* ---- Catálogo público ---- */
