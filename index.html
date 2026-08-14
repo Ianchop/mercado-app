@@ -448,6 +448,7 @@ function migrarProductos(){
     }
     if(state.negocio.envioLat === undefined) state.negocio.envioLat = null;
     if(state.negocio.envioLng === undefined) state.negocio.envioLng = null;
+    if(state.negocio.cupones === undefined) state.negocio.cupones = [];
   }
 }
 // Distancia en línea recta entre dos puntos (fórmula de Haversine), para no
@@ -492,6 +493,7 @@ function sincronizarCatalogoPublico(){
     envioPrecio100m: state.negocio.envioPrecio100m || 0,
     envioLat: state.negocio.envioLat ?? null,
     envioLng: state.negocio.envioLng ?? null,
+    cupones: (state.negocio.cupones || []).filter(c=>c.activo).map(c => ({ codigo: c.codigo, porcentaje: c.porcentaje })),
     categorias: state.categorias.map(c => ({ id: c.id, nombre: c.nombre, emoji: c.emoji || '' })),
     productos: state.productos.map(p => ({
       id: p.id, nombre: p.nombre, marca: p.marca || '', precio: p.precio,
@@ -3883,6 +3885,7 @@ function tarjetaProductoStock(p){
         </span>
       </button>
       <span class="text-gray-400 text-sm whitespace-nowrap ml-2">${money(p.precio)}</span>
+      <button onclick="compartirProducto('${p.id}')" class="tap text-gray-400 ml-2 flex-shrink-0" title="Compartir">${icono('share-2','w-5 h-5')}</button>
     </div>
     ${est && est.dias <= 30 ? `<div class="mb-2"><span class="badge-venc" style="background:${colVenc.bg};color:${colVenc.text};">${est.texto}</span></div>` : ''}
     ${estTemp && estTemp.color==='amber' ? `<div class="mb-2"><span class="badge-venc" style="background:${colTemp.bg};color:${colTemp.text};">${estTemp.texto}</span></div>` : ''}
@@ -3906,6 +3909,21 @@ function ajustarStock(id, delta){
   p.stock = Math.max(0, p.stock + delta);
   guardar();
   renderApp();
+}
+// navigator.share (compartir nativo del celular) solo existe en sitios con
+// HTTPS: si no está disponible, cae directo a abrir WhatsApp con el mismo
+// texto ya armado, así nunca queda un botón que no hace nada.
+async function compartirProducto(id){
+  const p = state.productos.find(x=>x.id===id);
+  if(!p) return;
+  const link = (state.negocio.catalogoPublico && usuarioFirebase) ? urlCatalogoPublico() : '';
+  const texto = `${p.emoji} ${p.nombre}${p.marca?' — '+p.marca:''}\n${money(p.precio)}${link ? '\n\nMirá el catálogo completo acá: '+link : ''}`;
+  if(navigator.share){
+    try{ await navigator.share({ title: p.nombre, text: texto }); }
+    catch(e){ /* el dueño canceló el compartir, no hacer nada */ }
+  } else {
+    window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, '_blank');
+  }
 }
 
 /* ---- Categorías ---- */
@@ -5043,6 +5061,7 @@ function vistaPedidos(){
       <div class="text-gray-400 text-xs mb-2">${p.fecha ? fechaHora(p.fecha) : ''}</div>
       <div class="flex flex-col gap-1 mb-2">
         ${(p.items||[]).map(it => `<div class="text-sm text-gray-600 flex justify-between"><span>${it.cantidad} x ${it.nombre}${it.talle?` (${it.talle}${it.color?' · '+it.color:''})`:''}</span><span>${money(it.precio*it.cantidad)}</span></div>`).join('')}
+        ${p.cuponDescuento > 0 ? `<div class="text-sm text-emerald-600 flex justify-between font-semibold"><span>🎟️ Cupón ${p.cuponCodigo}</span><span>-${money(p.cuponDescuento)}</span></div>` : ''}
         ${p.envioCosto > 0 ? `<div class="text-sm text-indigo-700 flex justify-between font-semibold"><span>🚚 Envío (${p.envioKm} km)</span><span>${money(p.envioCosto)}</span></div>` : ''}
       </div>
       <div class="flex justify-between font-bold text-gray-800 border-t border-gray-100 pt-2 mb-3">
@@ -5749,6 +5768,30 @@ function vistaConfig(){
     ` : ''}
   </div>
 
+  ${state.negocio.catalogoPublico ? `
+  <div class="card p-4 mb-4">
+    <div class="font-bold text-gray-700 mb-1 text-lg">🎟️ Cupones de descuento</div>
+    <div class="text-gray-500 text-sm mb-3">Códigos que tus clientes pueden poner al hacer un pedido desde el catálogo público, para llevarse un % de descuento en los productos (no se aplica al envío).</div>
+    ${(state.negocio.cupones||[]).length ? `
+    <div class="flex flex-col gap-2 mb-3">
+      ${state.negocio.cupones.map((c,i) => `
+        <div class="flex items-center justify-between bg-gray-50 rounded-xl px-3 py-2.5">
+          <span class="font-bold text-gray-800">${c.codigo} <span class="text-indigo-700">-${c.porcentaje}%</span></span>
+          <div class="flex items-center gap-2">
+            <button onclick="cambiarCuponActivo(${i}, ${!c.activo})" class="tap px-2.5 py-1 rounded-lg text-xs font-bold ${c.activo?'bg-emerald-100 text-emerald-700':'bg-gray-200 text-gray-500'}">${c.activo?'Activo':'Pausado'}</button>
+            <button onclick="eliminarCupon(${i})" class="tap text-red-500 font-bold px-1">✕</button>
+          </div>
+        </div>
+      `).join('')}
+    </div>` : ''}
+    <div class="grid grid-cols-3 gap-2 mb-2">
+      <input id="cfg-cupon-codigo" placeholder="Código" class="col-span-2 border-2 border-gray-200 rounded-2xl px-3 py-3 text-base" style="text-transform:uppercase;" />
+      <input id="cfg-cupon-porcentaje" type="number" min="1" max="90" placeholder="%" class="col-span-1 border-2 border-gray-200 rounded-2xl px-3 py-3 text-base" />
+    </div>
+    <button onclick="agregarCupon()" class="tap w-full bg-white border-2 border-dashed border-indigo-200 text-indigo-700 font-bold py-3 rounded-2xl text-sm">+ Crear cupón</button>
+  </div>
+  ` : ''}
+
   <div class="card p-4 mb-4">
     <div class="font-bold text-gray-700 mb-1 text-lg">💳 Cobros con MercadoPago</div>
     <div class="text-gray-500 text-sm mb-3">Pegá acá el Access Token de tu propia cuenta de MercadoPago (mercadopago.com.ar/developers/panel/app) para poder generar un cobro por el monto exacto de cada venta, con QR, en vez del link fijo de antes. El dinero entra directo a tu cuenta — nunca pasa por nosotros.</div>
@@ -5843,6 +5886,29 @@ function guardarConfig(){
   guardar();
   renderApp();
   toast('Datos guardados', {icon:'✅'});
+}
+function agregarCupon(){
+  const codigo = document.getElementById('cfg-cupon-codigo').value.trim().toUpperCase();
+  const porcentaje = parseInt(document.getElementById('cfg-cupon-porcentaje').value);
+  if(!codigo){ toast('Poné un código para el cupón', {icon:'✍️'}); return; }
+  if(!porcentaje || porcentaje<=0 || porcentaje>90){ toast('Poné un porcentaje entre 1 y 90', {icon:'✍️'}); return; }
+  if(!state.negocio.cupones) state.negocio.cupones = [];
+  if(state.negocio.cupones.some(c=>c.codigo===codigo)){ toast('Ya existe un cupón con ese código', {icon:'⚠️'}); return; }
+  state.negocio.cupones.push({ codigo, porcentaje, activo:true });
+  guardar();
+  renderApp();
+  toast('Cupón creado', {icon:'🎟️'});
+}
+function cambiarCuponActivo(indice, activo){
+  state.negocio.cupones[indice].activo = activo;
+  guardar();
+  renderApp();
+}
+function eliminarCupon(indice){
+  state.negocio.cupones.splice(indice, 1);
+  guardar();
+  renderApp();
+  toast('Cupón eliminado', {icon:'🗑️'});
 }
 // Solo para el admin en modo demo: le deja cambiar el rubro del negocio de
 // prueba para mostrarle a un comercio de otro rubro cómo se vería la app con
@@ -6331,6 +6397,21 @@ let busquedaPublico = '';
 let categoriaPublico = '';
 let talleFiltroPublico = '';
 let _pubQuiereEnvio = false;
+let _pubCuponAplicado = null;
+function aplicarCuponPublico(){
+  const d = catalogoPublicoDatos;
+  const codigo = document.getElementById('pub-cupon-codigo').value.trim().toUpperCase();
+  if(!codigo) return;
+  const cupon = (d.cupones||[]).find(c=>c.codigo===codigo);
+  if(!cupon){ toast('Ese cupón no existe o ya no es válido', {icon:'⚠️'}); return; }
+  _pubCuponAplicado = cupon;
+  mostrarCarritoPublico();
+  toast(`Cupón ${cupon.codigo} aplicado`, {icon:'🎟️'});
+}
+function quitarCuponPublico(){
+  _pubCuponAplicado = null;
+  mostrarCarritoPublico();
+}
 let _pubKmEnvio = '';           // respaldo manual, solo si el local no marcó su ubicación
 let _pubLatEnvio = null;        // punto que el cliente marcó en el mapa
 let _pubLngEnvio = null;
@@ -6505,7 +6586,8 @@ function mostrarCarritoPublico(){
   const totalProductos = items.reduce((s,x)=>s+x.p.precio*x.cantidad, 0);
   const ofreceEnvio = !!(d.envioActivado && d.envioPrecio100m > 0);
   const envio = calcularEnvioPublico();
-  const total = totalProductos + envio.costo;
+  const descuentoCupon = _pubCuponAplicado ? Math.round(totalProductos * _pubCuponAplicado.porcentaje/100) : 0;
+  const total = totalProductos - descuentoCupon + envio.costo;
   abrirModal(`
     <div class="p-5">
       <div class="text-xl font-extrabold text-gray-900 mb-4">Tu pedido</div>
@@ -6549,6 +6631,22 @@ function mostrarCarritoPublico(){
           <div class="text-gray-400 text-sm mt-1">Costo de envío: <span id="pub-costo-envio">${money(envio.costo)}</span></div>
         </div>`) : ''}
       </div>` : ''}
+      ${(d.cupones||[]).length ? `
+      <div class="border-t border-gray-100 pt-3 mb-2">
+        ${_pubCuponAplicado ? `
+        <div class="flex items-center justify-between bg-emerald-50 text-emerald-700 rounded-xl px-3 py-2 text-sm font-bold">
+          <span>🎟️ ${_pubCuponAplicado.codigo} (-${_pubCuponAplicado.porcentaje}%)</span>
+          <button onclick="quitarCuponPublico()" class="text-emerald-700 underline font-semibold">Quitar</button>
+        </div>
+        ` : `
+        <div class="flex gap-2">
+          <input id="pub-cupon-codigo" placeholder="¿Tenés un cupón?" class="flex-1 border-2 border-gray-200 rounded-xl px-3 py-2.5 text-sm" style="text-transform:uppercase;" onkeydown="if(event.key==='Enter'){event.preventDefault(); aplicarCuponPublico();}" />
+          <button onclick="aplicarCuponPublico()" class="tap bg-white border-2 border-gray-200 text-gray-700 font-bold px-4 rounded-xl text-sm">Aplicar</button>
+        </div>
+        `}
+      </div>
+      ` : ''}
+      ${descuentoCupon > 0 ? `<div class="flex justify-between text-emerald-600 font-semibold text-sm mb-1"><span>Descuento cupón</span><span>-${money(descuentoCupon)}</span></div>` : ''}
       <div class="flex justify-between font-extrabold text-lg mb-4 pt-3 border-t border-gray-100">
         <span>Total</span><span id="pub-total-final">${money(total)}</span>
       </div>
@@ -6586,12 +6684,13 @@ function actualizarCostoEnvioClienteUI(){
   const items = carritoPublico.map(it => ({ ...it, p: d.productos.find(x=>x.id===it.productoId) })).filter(x=>x.p);
   const totalProductos = items.reduce((s,x)=>s+x.p.precio*x.cantidad, 0);
   const envio = calcularEnvioPublico();
+  const descuentoCupon = _pubCuponAplicado ? Math.round(totalProductos * _pubCuponAplicado.porcentaje/100) : 0;
   const elKm = document.getElementById('pub-km-envio');
   const elCosto = document.getElementById('pub-costo-envio');
   const elTotal = document.getElementById('pub-total-final');
   if(elKm) elKm.textContent = envio.km || '—';
   if(elCosto) elCosto.textContent = money(envio.costo);
-  if(elTotal) elTotal.textContent = money(totalProductos + envio.costo);
+  if(elTotal) elTotal.textContent = money(totalProductos - descuentoCupon + envio.costo);
 }
 function iniciarMapaEnvioCliente(latLocal, lngLocal){
   const div = document.getElementById('mapa-envio-cliente');
@@ -6652,9 +6751,10 @@ function usarUbicacionActualCliente(){
     { enableHighAccuracy:true, timeout:10000 }
   );
 }
-function textoPedidoPublico(items, total, envio){
+function textoPedidoPublico(items, total, envio, descuentoCupon){
   let txt = 'Hola! Quiero hacer un pedido:\n\n';
   items.forEach(x => { txt += `• ${x.cantidad} x ${x.p.nombre}${x.talle?` (${x.talle}${x.color?' · '+x.color:''})`:''} — ${money(x.p.precio*x.cantidad)}\n`; });
+  if(descuentoCupon > 0) txt += `• Cupón ${_pubCuponAplicado.codigo} (-${_pubCuponAplicado.porcentaje}%) — -${money(descuentoCupon)}\n`;
   if(envio && envio.activo) txt += `• Envío a domicilio (${envio.km} km) — ${money(envio.costo)}\n`;
   txt += `\nTotal: ${money(total)}`;
   return txt;
@@ -6666,9 +6766,10 @@ function enviarPedidoPublicoWhatsApp(){
   if(!d.telefono){ toast('Este negocio todavía no cargó su WhatsApp', { icon:'📵' }); return; }
   const totalProductos = items.reduce((s,x)=>s+x.p.precio*x.cantidad, 0);
   const envio = calcularEnvioPublico();
-  const total = totalProductos + envio.costo;
+  const descuentoCupon = _pubCuponAplicado ? Math.round(totalProductos * _pubCuponAplicado.porcentaje/100) : 0;
+  const total = totalProductos - descuentoCupon + envio.costo;
   const nombre = (document.getElementById('pub-nombre')?.value || '').trim();
-  let txt = textoPedidoPublico(items, total, envio);
+  let txt = textoPedidoPublico(items, total, envio, descuentoCupon);
   if(nombre) txt = `Soy ${nombre}. ` + txt;
   window.open(`https://wa.me/${limpiarTelefono(d.telefono)}?text=${encodeURIComponent(txt)}`, '_blank');
 }
@@ -6681,7 +6782,8 @@ async function enviarPedidoPublicoWeb(){
   if(!telefono){ toast('Dejanos tu WhatsApp para poder avisarte', { icon:'📵' }); return; }
   const totalProductos = items.reduce((s,x)=>s+x.p.precio*x.cantidad, 0);
   const envio = calcularEnvioPublico();
-  const total = totalProductos + envio.costo;
+  const descuentoCupon = _pubCuponAplicado ? Math.round(totalProductos * _pubCuponAplicado.porcentaje/100) : 0;
+  const total = totalProductos - descuentoCupon + envio.costo;
   try{
     await window.fbCrearPedidoPublico({
       negocioUid: catalogoPublicoUid,
@@ -6692,6 +6794,8 @@ async function enviarPedidoPublicoWeb(){
       envioCosto: envio.activo ? envio.costo : 0,
       envioLat: (envio.activo && _pubLatEnvio != null) ? _pubLatEnvio : null,
       envioLng: (envio.activo && _pubLngEnvio != null) ? _pubLngEnvio : null,
+      cuponCodigo: _pubCuponAplicado ? _pubCuponAplicado.codigo : '',
+      cuponDescuento: descuentoCupon,
       total,
       estado: 'nuevo',
       fecha: Date.now()
@@ -6701,6 +6805,7 @@ async function enviarPedidoPublicoWeb(){
     _pubKmEnvio = '';
     _pubLatEnvio = null;
     _pubLngEnvio = null;
+    _pubCuponAplicado = null;
     cerrarModal();
     renderCatalogoPublico();
     toast('¡Pedido enviado! Te van a contactar por WhatsApp para confirmar.', { icon:'✅', duracion:5000 });
