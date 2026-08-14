@@ -449,6 +449,9 @@ function migrarProductos(){
     if(state.negocio.envioLat === undefined) state.negocio.envioLat = null;
     if(state.negocio.envioLng === undefined) state.negocio.envioLng = null;
     if(state.negocio.cupones === undefined) state.negocio.cupones = [];
+    if(state.negocio.fidelizacionActiva === undefined) state.negocio.fidelizacionActiva = false;
+    if(state.negocio.fidelizacionMeta === undefined) state.negocio.fidelizacionMeta = 10;
+    if(state.negocio.fidelizacionPremio === undefined) state.negocio.fidelizacionPremio = '';
   }
 }
 // Distancia en línea recta entre dos puntos (fórmula de Haversine), para no
@@ -3845,7 +3848,8 @@ function vistaStock(){
     <button onclick="mostrarCombos()" class="tap bg-white text-gray-700 border-2 border-gray-200 font-bold text-lg py-3.5 rounded-2xl">🎁 Combos</button>
   </div>
   <button onclick="mostrarImportarExcel()" class="tap w-full bg-white text-emerald-700 border-2 border-dashed border-emerald-200 font-bold text-base py-3 rounded-2xl mb-2 flex items-center justify-center gap-2">${icono('file-spreadsheet','w-5 h-5')} Importar desde Excel</button>
-  <button onclick="mostrarImportarCatalogo()" class="tap w-full bg-white text-indigo-700 border-2 border-dashed border-indigo-200 font-bold text-base py-3 rounded-2xl mb-4 flex items-center justify-center gap-2">${icono('download','w-5 h-5')} Importar catálogo completo (${CATALOGO_PRODUCTOS.length} productos)</button>
+  <button onclick="mostrarImportarCatalogo()" class="tap w-full bg-white text-indigo-700 border-2 border-dashed border-indigo-200 font-bold text-base py-3 rounded-2xl mb-2 flex items-center justify-center gap-2">${icono('download','w-5 h-5')} Importar catálogo completo (${CATALOGO_PRODUCTOS.length} productos)</button>
+  ${state.productos.length ? `<button onclick="mostrarSelectorEtiquetas()" class="tap w-full bg-white text-gray-700 border-2 border-gray-200 font-bold text-base py-3 rounded-2xl mb-4 flex items-center justify-center gap-2">${icono('tag','w-5 h-5')} Imprimir etiquetas de precio</button>` : ''}
 
   ${listaHTML}
 
@@ -3924,6 +3928,81 @@ async function compartirProducto(id){
   } else {
     window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, '_blank');
   }
+}
+
+/* ---- Etiquetas de precio imprimibles ---- */
+let _productosParaEtiquetas = new Set();
+function mostrarSelectorEtiquetas(){
+  _productosParaEtiquetas = new Set(state.productos.map(p=>p.id));
+  renderSelectorEtiquetas();
+}
+function renderSelectorEtiquetas(){
+  abrirModal(`
+    <div class="p-5">
+      <div class="text-xl font-extrabold text-gray-900 mb-1">Imprimir etiquetas</div>
+      <div class="text-gray-400 text-sm mb-3">Elegí qué productos llevan etiqueta. Si un producto tiene talles, se imprime una etiqueta por cada uno.</div>
+      <button onclick="alternarTodosEtiquetas()" class="tap w-full bg-gray-50 text-gray-700 font-bold py-2.5 rounded-xl text-sm mb-3">${_productosParaEtiquetas.size === state.productos.length ? 'Deseleccionar todos' : 'Seleccionar todos'}</button>
+      <div class="flex flex-col gap-2 max-h-72 overflow-y-auto mb-4">
+        ${state.productos.map(p => `
+          <label class="flex items-center gap-3 bg-gray-50 rounded-xl px-3 py-2.5">
+            <input type="checkbox" ${_productosParaEtiquetas.has(p.id)?'checked':''} onchange="alternarProductoEtiqueta('${p.id}')" class="w-5 h-5" />
+            <span class="font-bold text-gray-800 flex-1 min-w-0 truncate">${p.emoji} ${p.nombre}</span>
+            <span class="text-gray-400 text-sm">${money(p.precio)}</span>
+          </label>
+        `).join('')}
+      </div>
+      <button onclick="imprimirEtiquetas()" class="tap w-full bg-indigo-700 text-white font-bold py-4 rounded-2xl text-lg mb-2" ${_productosParaEtiquetas.size===0?'disabled':''}>🖨️ Imprimir (${_productosParaEtiquetas.size})</button>
+      <button onclick="cerrarModal()" class="tap w-full text-gray-400 font-semibold py-3">Cancelar</button>
+    </div>
+  `);
+}
+function alternarProductoEtiqueta(id){
+  if(_productosParaEtiquetas.has(id)) _productosParaEtiquetas.delete(id);
+  else _productosParaEtiquetas.add(id);
+  renderSelectorEtiquetas();
+}
+function alternarTodosEtiquetas(){
+  if(_productosParaEtiquetas.size === state.productos.length) _productosParaEtiquetas.clear();
+  else _productosParaEtiquetas = new Set(state.productos.map(p=>p.id));
+  renderSelectorEtiquetas();
+}
+function imprimirEtiquetas(){
+  const seleccionados = state.productos.filter(p=>_productosParaEtiquetas.has(p.id));
+  if(!seleccionados.length) return;
+  const conQr = !!(state.negocio.catalogoPublico && usuarioFirebase);
+  let qrDataUrl = '';
+  if(conQr){
+    const qr = qrcode(0, 'M');
+    qr.addData(urlCatalogoPublico());
+    qr.make();
+    qrDataUrl = qr.createDataURL(4,4);
+  }
+  // Un producto con talles imprime una etiqueta por cada talle/color, porque
+  // cada percha/prenda física necesita la suya.
+  const etiquetas = [];
+  seleccionados.forEach(p => {
+    if(p.variantes && p.variantes.length){
+      p.variantes.forEach(v => etiquetas.push({ nombre: p.nombre, marca: p.marca, precio: p.precio, detalle: `${v.talle}${v.color?' · '+v.color:''}` }));
+    } else {
+      etiquetas.push({ nombre: p.nombre, marca: p.marca, precio: p.precio, detalle: '' });
+    }
+  });
+  document.getElementById('area-impresion').innerHTML = `
+    <div style="display:flex; flex-wrap:wrap; width:600px;">
+      ${etiquetas.map(e => `
+        <div style="width:180px; border:1px dashed #999; padding:10px; margin:4px; text-align:center; font-family:sans-serif;">
+          <div style="font-weight:bold; font-size:13px; line-height:1.2;">${e.nombre}</div>
+          ${e.marca ? `<div style="font-size:11px; color:#666;">${e.marca}</div>` : ''}
+          ${e.detalle ? `<div style="font-size:11px; color:#666;">${e.detalle}</div>` : ''}
+          <div style="font-size:20px; font-weight:bold; margin:4px 0;">${money(e.precio)}</div>
+          ${qrDataUrl ? `<img src="${qrDataUrl}" style="width:60px; height:60px;" />` : ''}
+          <div style="font-size:9px; color:#999;">${state.negocio.nombre}</div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+  cerrarModal();
+  window.print();
 }
 
 /* ---- Categorías ---- */
@@ -5203,13 +5282,30 @@ function vistaClientes(){
   return `
   <button onclick="mostrarFormCliente()" class="tap w-full bg-indigo-700 text-white font-bold text-lg py-3.5 rounded-2xl mt-2 mb-4">+ Nuevo cliente</button>
   ${state.clientes.length ? state.clientes.map(c => `
-    <div class="card p-4 mb-3 flex items-center justify-between">
-      <button onclick="mostrarFormCliente('${c.id}')" class="text-left">
-        <div class="font-bold text-gray-800 text-lg">👤 ${c.nombre}</div>
-        <div class="text-gray-400 text-sm">${c.telefono || 'Sin teléfono'}</div>
-        ${c.fiado>0 ? `<div class="text-red-600 font-bold text-sm mt-1">Debe ${money(c.fiado)}</div>` : ''}
-      </button>
-      ${c.telefono ? `<a href="https://wa.me/${limpiarTelefono(c.telefono)}" target="_blank" class="tap w-11 h-11 rounded-full bg-green-50 flex items-center justify-center text-xl">💬</a>` : ''}
+    <div class="card p-4 mb-3">
+      <div class="flex items-center justify-between">
+        <button onclick="mostrarFormCliente('${c.id}')" class="text-left">
+          <div class="font-bold text-gray-800 text-lg">👤 ${c.nombre}</div>
+          <div class="text-gray-400 text-sm">${c.telefono || 'Sin teléfono'}</div>
+          ${c.fiado>0 ? `<div class="text-red-600 font-bold text-sm mt-1">Debe ${money(c.fiado)}</div>` : ''}
+        </button>
+        ${c.telefono ? `<a href="https://wa.me/${limpiarTelefono(c.telefono)}" target="_blank" class="tap w-11 h-11 rounded-full bg-green-50 flex items-center justify-center text-xl">💬</a>` : ''}
+      </div>
+      ${state.negocio.fidelizacionActiva ? `
+      <div class="mt-3 pt-3 border-t border-gray-100">
+        ${(c.sellos||0) >= state.negocio.fidelizacionMeta ? `
+        <button onclick="canjearFidelizacion('${c.id}')" class="tap w-full bg-amber-500 text-white font-bold py-2.5 rounded-xl text-sm">🎉 ¡Completó la tarjeta! Canjear${state.negocio.fidelizacionPremio?': '+state.negocio.fidelizacionPremio:''}</button>
+        ` : `
+        <div class="flex items-center gap-2">
+          <div class="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
+            <div class="h-full bg-amber-400" style="width:${Math.min(100,(c.sellos||0)/state.negocio.fidelizacionMeta*100)}%"></div>
+          </div>
+          <span class="text-xs text-gray-400 font-semibold whitespace-nowrap">🎟️ ${c.sellos||0}/${state.negocio.fidelizacionMeta}</span>
+          <button onclick="agregarSelloCliente('${c.id}')" class="tap bg-amber-50 text-amber-700 font-bold px-3 py-1.5 rounded-lg text-sm whitespace-nowrap">+1 sello</button>
+        </div>
+        `}
+      </div>
+      ` : ''}
     </div>
   `).join('') : `<div class="text-center py-16 text-gray-400"><div class="text-5xl mb-3">👥</div>Todavía no tenés clientes cargados</div>`}
   `;
@@ -5239,7 +5335,7 @@ function guardarCliente(id){
   if(id){
     Object.assign(state.clientes.find(c=>c.id===id), { nombre, telefono, cumpleanos, limiteFiado });
   } else {
-    state.clientes.push({ id: uid(), nombre, telefono, cumpleanos, limiteFiado, fiado: 0, creditoAFavor: 0 });
+    state.clientes.push({ id: uid(), nombre, telefono, cumpleanos, limiteFiado, fiado: 0, creditoAFavor: 0, sellos: 0 });
   }
   guardar();
   cerrarModal();
@@ -5252,6 +5348,24 @@ function eliminarCliente(id){
     cerrarModal();
     renderApp();
   });
+}
+function agregarSelloCliente(id){
+  const c = state.clientes.find(x=>x.id===id);
+  c.sellos = (c.sellos||0) + 1;
+  guardar();
+  renderApp();
+  if(c.sellos >= state.negocio.fidelizacionMeta) toast(`¡${c.nombre} completó la tarjeta! 🎉`, {icon:'🎟️', duracion:5000});
+  else toast('Sello agregado', {icon:'🎟️', duracion:1500});
+}
+function canjearFidelizacion(id){
+  const c = state.clientes.find(x=>x.id===id);
+  confirmarAccion(`¿Ya le diste el premio a ${c.nombre}${state.negocio.fidelizacionPremio?' ('+state.negocio.fidelizacionPremio+')':''}? Se reinicia la tarjeta a 0.`, () => {
+    c.sellos = 0;
+    guardar();
+    cerrarModal();
+    renderApp();
+    toast('¡Tarjeta reiniciada!', {icon:'🎉'});
+  }, 'Sí, ya se lo di');
 }
 
 /* ====================== REPORTES ====================== */
@@ -5793,6 +5907,22 @@ function vistaConfig(){
   ` : ''}
 
   <div class="card p-4 mb-4">
+    <div class="font-bold text-gray-700 mb-1 text-lg">🎟️ Tarjeta de fidelización</div>
+    <div class="text-gray-500 text-sm mb-3">Tus clientes juntan un sello por cada compra (lo cargás vos a mano desde su perfil en Clientes). Al completar la tarjeta, les das el premio que elijas.</div>
+    <div class="grid grid-cols-2 gap-2 mb-3">
+      <button onclick="cambiarFidelizacionActiva(true)" class="tap py-3 rounded-2xl font-bold border-2 ${state.negocio.fidelizacionActiva?'bg-indigo-700 text-white border-indigo-700':'bg-white text-gray-600 border-gray-200'}">Activado</button>
+      <button onclick="cambiarFidelizacionActiva(false)" class="tap py-3 rounded-2xl font-bold border-2 ${!state.negocio.fidelizacionActiva?'bg-indigo-700 text-white border-indigo-700':'bg-white text-gray-600 border-gray-200'}">Desactivado</button>
+    </div>
+    ${state.negocio.fidelizacionActiva ? `
+    <label class="font-semibold text-gray-600 text-sm">Sellos para completar la tarjeta</label>
+    <input id="cfg-fidelizacion-meta" type="number" min="2" value="${state.negocio.fidelizacionMeta||10}" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2" />
+    <label class="font-semibold text-gray-600 text-sm">Premio al completarla</label>
+    <input id="cfg-fidelizacion-premio" value="${state.negocio.fidelizacionPremio||''}" placeholder="Ej: 20% de descuento" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2 mb-3" />
+    <button onclick="guardarFidelizacion()" class="tap w-full bg-white border-2 border-gray-200 text-gray-700 font-bold py-3 rounded-2xl">Guardar</button>
+    ` : ''}
+  </div>
+
+  <div class="card p-4 mb-4">
     <div class="font-bold text-gray-700 mb-1 text-lg">💳 Cobros con MercadoPago</div>
     <div class="text-gray-500 text-sm mb-3">Pegá acá el Access Token de tu propia cuenta de MercadoPago (mercadopago.com.ar/developers/panel/app) para poder generar un cobro por el monto exacto de cada venta, con QR, en vez del link fijo de antes. El dinero entra directo a tu cuenta — nunca pasa por nosotros.</div>
     <input id="cfg-mp-token" type="password" value="${state.negocio.mercadoPagoAccessToken||''}" placeholder="APP_USR-..." class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2 mb-3" />
@@ -5909,6 +6039,18 @@ function eliminarCupon(indice){
   guardar();
   renderApp();
   toast('Cupón eliminado', {icon:'🗑️'});
+}
+function cambiarFidelizacionActiva(activo){
+  state.negocio.fidelizacionActiva = activo;
+  if(activo && !state.negocio.fidelizacionMeta) state.negocio.fidelizacionMeta = 10;
+  guardar();
+  renderApp();
+}
+function guardarFidelizacion(){
+  state.negocio.fidelizacionMeta = parseInt(document.getElementById('cfg-fidelizacion-meta').value) || 10;
+  state.negocio.fidelizacionPremio = document.getElementById('cfg-fidelizacion-premio').value.trim();
+  guardar();
+  toast('Guardado', {icon:'✅'});
 }
 // Solo para el admin en modo demo: le deja cambiar el rubro del negocio de
 // prueba para mostrarle a un comercio de otro rubro cómo se vería la app con
