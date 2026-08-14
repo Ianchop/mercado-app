@@ -436,6 +436,8 @@ function migrarProductos(){
     if(state.negocio.logoUrl === undefined) state.negocio.logoUrl = '';
     if(state.negocio.portadaUrl === undefined) state.negocio.portadaUrl = '';
     if(state.negocio.mercadoPagoAccessToken === undefined) state.negocio.mercadoPagoAccessToken = '';
+    if(state.negocio.envioActivado === undefined) state.negocio.envioActivado = false;
+    if(state.negocio.envioPrecioKm === undefined) state.negocio.envioPrecioKm = 0;
   }
 }
 
@@ -463,6 +465,8 @@ function sincronizarCatalogoPublico(){
     logoUrl: state.negocio.logoUrl || '',
     portadaUrl: state.negocio.portadaUrl || '',
     indexable: !!state.negocio.catalogoIndexable,
+    envioActivado: !!state.negocio.envioActivado,
+    envioPrecioKm: state.negocio.envioPrecioKm || 0,
     categorias: state.categorias.map(c => ({ id: c.id, nombre: c.nombre, emoji: c.emoji || '' })),
     productos: state.productos.map(p => ({
       id: p.id, nombre: p.nombre, marca: p.marca || '', precio: p.precio,
@@ -4770,11 +4774,8 @@ function vistaPedidos(){
       <button onclick="ir('#/config')" class="tap bg-indigo-700 text-white font-bold py-3 px-6 rounded-2xl">Ir a Configuración</button>
     </div>`;
   }
-  if(!pedidosEntrantes.length){
-    return `<div class="text-center py-16 text-gray-400"><div class="text-5xl mb-3">🛍️</div>Todavía no te llegó ningún pedido</div>`;
-  }
   const etiquetaEstado = { nuevo: ['Nuevo','bg-red-100 text-red-700'], visto: ['Visto','bg-amber-100 text-amber-700'], completado: ['Completado','bg-emerald-100 text-emerald-700'] };
-  return pedidosEntrantes.map(p => {
+  const listaHTML = pedidosEntrantes.length ? pedidosEntrantes.map(p => {
     const [etTxt, etClase] = etiquetaEstado[p.estado] || etiquetaEstado.nuevo;
     return `
     <div class="card p-4 mb-3">
@@ -4785,6 +4786,7 @@ function vistaPedidos(){
       <div class="text-gray-400 text-xs mb-2">${p.fecha ? fechaHora(p.fecha) : ''}</div>
       <div class="flex flex-col gap-1 mb-2">
         ${(p.items||[]).map(it => `<div class="text-sm text-gray-600 flex justify-between"><span>${it.cantidad} x ${it.nombre}</span><span>${money(it.precio*it.cantidad)}</span></div>`).join('')}
+        ${p.envioCosto > 0 ? `<div class="text-sm text-indigo-700 flex justify-between font-semibold"><span>🚚 Envío (${p.envioKm} km)</span><span>${money(p.envioCosto)}</span></div>` : ''}
       </div>
       <div class="flex justify-between font-bold text-gray-800 border-t border-gray-100 pt-2 mb-3">
         <span>Total</span><span>${money(p.total)}</span>
@@ -4796,7 +4798,38 @@ function vistaPedidos(){
           : `<span></span>`}
       </div>
     </div>`;
-  }).join('');
+  }).join('') : `<div class="text-center py-16 text-gray-400"><div class="text-5xl mb-3">🛍️</div>Todavía no te llegó ningún pedido</div>`;
+
+  return `
+  <div class="card p-4 mb-4">
+    <div class="font-bold text-gray-800 mb-1 flex items-center gap-2">🚚 Envío a domicilio</div>
+    <div class="text-gray-400 text-sm mb-3">Si lo activás, tus clientes van a poder pedir que les lleves el pedido a su casa, pagando un extra según los km que declaren.</div>
+    <div class="grid grid-cols-2 gap-2 ${state.negocio.envioActivado ? 'mb-3' : ''}">
+      <button onclick="cambiarEnvioActivado(true)" class="tap py-2.5 rounded-xl font-bold border-2 ${state.negocio.envioActivado?'bg-indigo-700 text-white border-indigo-700':'bg-white text-gray-600 border-gray-200'}">Activado</button>
+      <button onclick="cambiarEnvioActivado(false)" class="tap py-2.5 rounded-xl font-bold border-2 ${!state.negocio.envioActivado?'bg-indigo-700 text-white border-indigo-700':'bg-white text-gray-600 border-gray-200'}">Desactivado</button>
+    </div>
+    ${state.negocio.envioActivado ? `
+    <label class="font-semibold text-gray-600 text-sm">Precio por km</label>
+    <div class="flex gap-2 mt-1">
+      <input id="pedidos-precio-km" type="number" min="0" step="1" value="${state.negocio.envioPrecioKm || ''}" placeholder="Ej: 200" class="flex-1 border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg" />
+      <button onclick="guardarPrecioKmEnvio()" class="tap bg-indigo-700 text-white font-bold px-5 rounded-2xl">Guardar</button>
+    </div>
+    <div class="text-gray-400 text-xs mt-1">El cliente declara los km al hacer el pedido desde tu catálogo, y esto se le suma al total.</div>
+    ` : ''}
+  </div>
+  ${listaHTML}
+  `;
+}
+function cambiarEnvioActivado(activo){
+  state.negocio.envioActivado = activo;
+  guardar();
+  renderApp();
+}
+function guardarPrecioKmEnvio(){
+  const val = parseFloat(document.getElementById('pedidos-precio-km').value) || 0;
+  state.negocio.envioPrecioKm = val;
+  guardar();
+  toast('Guardado', {icon:'✅'});
 }
 function cambiarEstadoPedido(id, estado){
   const p = pedidosEntrantes.find(x=>x.id===id);
@@ -5444,9 +5477,7 @@ function mostrarPasosAfipConCsr(csrPem){
   `);
 }
 function copiarCsrAfip(){
-  navigator.clipboard.writeText(window.__csrGeneradoAfip || '')
-    .then(() => toast('CSR copiado', {icon:'📋'}))
-    .catch(() => toast('No se pudo copiar. Copialo a mano del cuadro de texto.', {icon:'⚠️'}));
+  copiarTexto(window.__csrGeneradoAfip || '', 'CSR copiado');
 }
 
 /* ---- Comprobante por email (EmailJS) ----
@@ -5541,10 +5572,37 @@ function dataUrlQrCatalogo(){
   qr.make();
   return qr.createDataURL(6, 8);
 }
+// navigator.clipboard no existe en sitios sin HTTPS (solo en HTTPS o
+// localhost) — sin este respaldo, el botón de copiar no hacía nada mientras
+// mercadoapp.my no tuviera el candado seguro. execCommand('copy') es viejo
+// pero funciona en cualquier protocolo.
+function copiarTexto(texto, mensajeExito){
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(texto)
+      .then(() => toast(mensajeExito, {icon:'📋'}))
+      .catch(() => copiarTextoRespaldo(texto, mensajeExito));
+  } else {
+    copiarTextoRespaldo(texto, mensajeExito);
+  }
+}
+function copiarTextoRespaldo(texto, mensajeExito){
+  try{
+    const ta = document.createElement('textarea');
+    ta.value = texto;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.focus(); ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    if(ok) toast(mensajeExito, {icon:'📋'});
+    else toast('No se pudo copiar. Copialo a mano.', {icon:'⚠️'});
+  }catch(e){
+    toast('No se pudo copiar. Copialo a mano.', {icon:'⚠️'});
+  }
+}
 function copiarLinkCatalogo(){
-  navigator.clipboard.writeText(urlCatalogoPublico())
-    .then(() => toast('Link copiado', {icon:'📋'}))
-    .catch(() => toast('No se pudo copiar. Copialo a mano.', {icon:'⚠️'}));
+  copiarTexto(urlCatalogoPublico(), 'Link copiado');
 }
 function descargarQrCatalogo(){
   const a = document.createElement('a');
@@ -5756,6 +5814,14 @@ let catalogoPublicoDatos = null;
 let carritoPublico = [];       // [{productoId, cantidad}]
 let busquedaPublico = '';
 let categoriaPublico = '';
+let _pubQuiereEnvio = false;
+let _pubKmEnvio = '';
+function calcularEnvioPublico(){
+  const d = catalogoPublicoDatos;
+  if(!d || !d.envioActivado || !d.envioPrecioKm || !_pubQuiereEnvio) return { activo:false, km:0, costo:0 };
+  const km = parseFloat(_pubKmEnvio) || 0;
+  return { activo:true, km, costo: km * d.envioPrecioKm };
+}
 
 async function arrancarCatalogoPublico(uidNegocio){
   catalogoPublicoUid = uidNegocio;
@@ -5864,7 +5930,10 @@ function quitarDelCarritoPublico(productoId){
 function mostrarCarritoPublico(){
   const d = catalogoPublicoDatos;
   const items = carritoPublico.map(it => ({ ...it, p: d.productos.find(x=>x.id===it.productoId) })).filter(x=>x.p);
-  const total = items.reduce((s,x)=>s+x.p.precio*x.cantidad, 0);
+  const totalProductos = items.reduce((s,x)=>s+x.p.precio*x.cantidad, 0);
+  const ofreceEnvio = !!(d.envioActivado && d.envioPrecioKm > 0);
+  const envio = calcularEnvioPublico();
+  const total = totalProductos + envio.costo;
   abrirModal(`
     <div class="p-5">
       <div class="text-xl font-extrabold text-gray-900 mb-4">Tu pedido</div>
@@ -5884,8 +5953,21 @@ function mostrarCarritoPublico(){
         `).join('') : `<div class="text-gray-400 text-center py-6">Carrito vacío</div>`}
       </div>
       ${items.length ? `
+      ${ofreceEnvio ? `
+      <div class="border-t border-gray-100 pt-3 mb-3">
+        <label class="flex items-center gap-2 font-semibold text-gray-700">
+          <input type="checkbox" id="pub-quiere-envio" ${_pubQuiereEnvio?'checked':''} onchange="cambiarQuiereEnvioPublico(this.checked)" class="w-5 h-5" />
+          🚚 Quiero que me lo lleven a domicilio
+        </label>
+        ${_pubQuiereEnvio ? `
+        <div class="mt-2">
+          <label class="text-gray-500 text-sm">¿A cuántos km estás del local?</label>
+          <input id="pub-km-envio" type="number" min="0" step="0.1" value="${_pubKmEnvio}" oninput="actualizarKmEnvioPublico(this.value)" placeholder="Ej: 3" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg mt-1" />
+          <div class="text-gray-400 text-sm mt-1">Costo de envío: <span id="pub-costo-envio">${money(envio.costo)}</span></div>
+        </div>` : ''}
+      </div>` : ''}
       <div class="flex justify-between font-extrabold text-lg mb-4 pt-3 border-t border-gray-100">
-        <span>Total</span><span>${money(total)}</span>
+        <span>Total</span><span id="pub-total-final">${money(total)}</span>
       </div>
       <label class="font-semibold text-gray-600 text-sm">Tu nombre</label>
       <input id="pub-nombre" placeholder="Nombre" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2 mb-2" />
@@ -5898,9 +5980,28 @@ function mostrarCarritoPublico(){
     </div>
   `);
 }
-function textoPedidoPublico(items, total){
+function cambiarQuiereEnvioPublico(checked){
+  _pubQuiereEnvio = checked;
+  mostrarCarritoPublico();
+}
+// Actualiza solo el número en pantalla en vez de rehacer todo el modal, para
+// no perder el cursor/foco del input mientras el cliente todavía está
+// escribiendo los km.
+function actualizarKmEnvioPublico(valor){
+  _pubKmEnvio = valor;
+  const d = catalogoPublicoDatos;
+  const items = carritoPublico.map(it => ({ ...it, p: d.productos.find(x=>x.id===it.productoId) })).filter(x=>x.p);
+  const totalProductos = items.reduce((s,x)=>s+x.p.precio*x.cantidad, 0);
+  const envio = calcularEnvioPublico();
+  const elCosto = document.getElementById('pub-costo-envio');
+  const elTotal = document.getElementById('pub-total-final');
+  if(elCosto) elCosto.textContent = money(envio.costo);
+  if(elTotal) elTotal.textContent = money(totalProductos + envio.costo);
+}
+function textoPedidoPublico(items, total, envio){
   let txt = 'Hola! Quiero hacer un pedido:\n\n';
   items.forEach(x => { txt += `• ${x.cantidad} x ${x.p.nombre} — ${money(x.p.precio*x.cantidad)}\n`; });
+  if(envio && envio.activo) txt += `• Envío a domicilio (${envio.km} km) — ${money(envio.costo)}\n`;
   txt += `\nTotal: ${money(total)}`;
   return txt;
 }
@@ -5909,9 +6010,11 @@ function enviarPedidoPublicoWhatsApp(){
   const items = carritoPublico.map(it => ({ ...it, p: d.productos.find(x=>x.id===it.productoId) })).filter(x=>x.p);
   if(!items.length) return;
   if(!d.telefono){ toast('Este negocio todavía no cargó su WhatsApp', { icon:'📵' }); return; }
-  const total = items.reduce((s,x)=>s+x.p.precio*x.cantidad, 0);
+  const totalProductos = items.reduce((s,x)=>s+x.p.precio*x.cantidad, 0);
+  const envio = calcularEnvioPublico();
+  const total = totalProductos + envio.costo;
   const nombre = (document.getElementById('pub-nombre')?.value || '').trim();
-  let txt = textoPedidoPublico(items, total);
+  let txt = textoPedidoPublico(items, total, envio);
   if(nombre) txt = `Soy ${nombre}. ` + txt;
   window.open(`https://wa.me/${limpiarTelefono(d.telefono)}?text=${encodeURIComponent(txt)}`, '_blank');
 }
@@ -5922,18 +6025,24 @@ async function enviarPedidoPublicoWeb(){
   const nombre = (document.getElementById('pub-nombre')?.value || '').trim();
   const telefono = (document.getElementById('pub-telefono')?.value || '').trim();
   if(!telefono){ toast('Dejanos tu WhatsApp para poder avisarte', { icon:'📵' }); return; }
-  const total = items.reduce((s,x)=>s+x.p.precio*x.cantidad, 0);
+  const totalProductos = items.reduce((s,x)=>s+x.p.precio*x.cantidad, 0);
+  const envio = calcularEnvioPublico();
+  const total = totalProductos + envio.costo;
   try{
     await window.fbCrearPedidoPublico({
       negocioUid: catalogoPublicoUid,
       clienteNombre: nombre,
       clienteTelefono: telefono,
       items: items.map(x => ({ productoId: x.p.id, nombre: x.p.nombre, cantidad: x.cantidad, precio: x.p.precio })),
+      envioKm: envio.activo ? envio.km : 0,
+      envioCosto: envio.activo ? envio.costo : 0,
       total,
       estado: 'nuevo',
       fecha: Date.now()
     });
     carritoPublico = [];
+    _pubQuiereEnvio = false;
+    _pubKmEnvio = '';
     cerrarModal();
     renderCatalogoPublico();
     toast('¡Pedido enviado! Te van a contactar por WhatsApp para confirmar.', { icon:'✅', duracion:5000 });
