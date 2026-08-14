@@ -439,7 +439,12 @@ function migrarProductos(){
     if(state.negocio.portadaUrl === undefined) state.negocio.portadaUrl = '';
     if(state.negocio.mercadoPagoAccessToken === undefined) state.negocio.mercadoPagoAccessToken = '';
     if(state.negocio.envioActivado === undefined) state.negocio.envioActivado = false;
-    if(state.negocio.envioPrecioKm === undefined) state.negocio.envioPrecioKm = 0;
+    // Antes se cargaba precio por km; se pasa a precio cada 100m (más fácil
+    // de pensar en números chicos). Si alguien ya había cargado un precio
+    // por km, se convierte una sola vez para no perderlo.
+    if(state.negocio.envioPrecio100m === undefined){
+      state.negocio.envioPrecio100m = state.negocio.envioPrecioKm ? state.negocio.envioPrecioKm / 10 : 0;
+    }
     if(state.negocio.envioLat === undefined) state.negocio.envioLat = null;
     if(state.negocio.envioLng === undefined) state.negocio.envioLng = null;
   }
@@ -483,7 +488,7 @@ function sincronizarCatalogoPublico(){
     portadaUrl: state.negocio.portadaUrl || '',
     indexable: !!state.negocio.catalogoIndexable,
     envioActivado: !!state.negocio.envioActivado,
-    envioPrecioKm: state.negocio.envioPrecioKm || 0,
+    envioPrecio100m: state.negocio.envioPrecio100m || 0,
     envioLat: state.negocio.envioLat ?? null,
     envioLng: state.negocio.envioLng ?? null,
     categorias: state.categorias.map(c => ({ id: c.id, nombre: c.nombre, emoji: c.emoji || '' })),
@@ -4830,10 +4835,10 @@ function vistaPedidos(){
       <button onclick="cambiarEnvioActivado(false)" class="tap py-2.5 rounded-xl font-bold border-2 ${!state.negocio.envioActivado?'bg-indigo-700 text-white border-indigo-700':'bg-white text-gray-600 border-gray-200'}">Desactivado</button>
     </div>
     ${state.negocio.envioActivado ? `
-    <label class="font-semibold text-gray-600 text-sm">Precio por km</label>
+    <label class="font-semibold text-gray-600 text-sm">Precio cada 100 metros</label>
     <div class="flex gap-2 mt-1 mb-3">
-      <input id="pedidos-precio-km" type="number" min="0" step="1" value="${state.negocio.envioPrecioKm || ''}" placeholder="Ej: 200" class="flex-1 border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg" />
-      <button onclick="guardarPrecioKmEnvio()" class="tap bg-indigo-700 text-white font-bold px-5 rounded-2xl">Guardar</button>
+      <input id="pedidos-precio-100m" type="number" min="0" step="1" value="${state.negocio.envioPrecio100m || ''}" placeholder="Ej: 20" class="flex-1 border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg" />
+      <button onclick="guardarPrecio100mEnvio()" class="tap bg-indigo-700 text-white font-bold px-5 rounded-2xl">Guardar</button>
     </div>
     <button onclick="mostrarMapaUbicacionLocal()" class="tap w-full bg-white border-2 border-dashed border-indigo-200 text-indigo-700 font-bold py-3 rounded-2xl text-sm flex items-center justify-center gap-2">📍 ${state.negocio.envioLat != null ? 'Cambiar ubicación del local' : 'Marcar ubicación del local'}</button>
     <div class="text-gray-400 text-xs mt-1">${state.negocio.envioLat != null ? 'El cliente marca su dirección en un mapa y la app calcula la distancia sola.' : 'Marcá tu local en el mapa para que el cliente elija su dirección y la app calcule los km sola (mientras tanto, te va a preguntar los km a mano).'}</div>
@@ -4847,9 +4852,9 @@ function cambiarEnvioActivado(activo){
   guardar();
   renderApp();
 }
-function guardarPrecioKmEnvio(){
-  const val = parseFloat(document.getElementById('pedidos-precio-km').value) || 0;
-  state.negocio.envioPrecioKm = val;
+function guardarPrecio100mEnvio(){
+  const val = parseFloat(document.getElementById('pedidos-precio-100m').value) || 0;
+  state.negocio.envioPrecio100m = val;
   guardar();
   toast('Guardado', {icon:'✅'});
 }
@@ -5911,7 +5916,7 @@ let _mapaEnvioCliente = null;
 let _marcadorEnvioCliente = null;
 function calcularEnvioPublico(){
   const d = catalogoPublicoDatos;
-  if(!d || !d.envioActivado || !d.envioPrecioKm || !_pubQuiereEnvio) return { activo:false, km:0, costo:0 };
+  if(!d || !d.envioActivado || !d.envioPrecio100m || !_pubQuiereEnvio) return { activo:false, km:0, costo:0 };
   let km;
   if(d.envioLat != null && d.envioLng != null && _pubLatEnvio != null && _pubLngEnvio != null){
     km = distanciaKm(d.envioLat, d.envioLng, _pubLatEnvio, _pubLngEnvio);
@@ -5919,7 +5924,8 @@ function calcularEnvioPublico(){
     km = parseFloat(_pubKmEnvio) || 0;
   }
   km = Math.round(km * 10) / 10;
-  return { activo:true, km, costo: Math.round(km * d.envioPrecioKm) };
+  // envioPrecio100m es el precio cada 100 metros, así que 1km = 10 tramos de 100m.
+  return { activo:true, km, costo: Math.round(km * 10 * d.envioPrecio100m) };
 }
 
 async function arrancarCatalogoPublico(uidNegocio){
@@ -6030,7 +6036,7 @@ function mostrarCarritoPublico(){
   const d = catalogoPublicoDatos;
   const items = carritoPublico.map(it => ({ ...it, p: d.productos.find(x=>x.id===it.productoId) })).filter(x=>x.p);
   const totalProductos = items.reduce((s,x)=>s+x.p.precio*x.cantidad, 0);
-  const ofreceEnvio = !!(d.envioActivado && d.envioPrecioKm > 0);
+  const ofreceEnvio = !!(d.envioActivado && d.envioPrecio100m > 0);
   const envio = calcularEnvioPublico();
   const total = totalProductos + envio.costo;
   abrirModal(`
