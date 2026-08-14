@@ -2889,6 +2889,17 @@ function descontarStockItem(p, it){
     p.stock = Math.max(0, p.stock - it.cantidad);
   }
 }
+// Inversa de descontarStockItem, para cuando un producto vuelve al stock
+// (devolución o cambio de talle).
+function sumarStockItem(p, it){
+  if(it.talle && p.variantes && p.variantes.length){
+    const va = p.variantes.find(v => v.talle===it.talle && (v.color||'')===(it.color||''));
+    if(va) va.stock = (va.stock||0) + it.cantidad;
+    p.stock = p.variantes.reduce((s,v)=>s+(parseInt(v.stock)||0), 0);
+  } else {
+    p.stock = (p.stock||0) + it.cantidad;
+  }
+}
 
 function agregarCombo(id, cantidad = 1){
   carritoCombos[id] = (carritoCombos[id] || 0) + cantidad;
@@ -3231,7 +3242,7 @@ function crearClienteYFiar(){
   const nombre = document.getElementById('nc-nombre').value.trim();
   if(!nombre){ toast('Escribí el nombre del cliente', {icon:'✍️'}); return; }
   const telefono = document.getElementById('nc-telefono').value.trim();
-  const cliente = { id: uid(), nombre, telefono, limiteFiado: 0, fiado: 0 };
+  const cliente = { id: uid(), nombre, telefono, limiteFiado: 0, fiado: 0, creditoAFavor: 0 };
   state.clientes.push(cliente);
   confirmarVenta('fiado', cliente.id);
 }
@@ -3451,7 +3462,7 @@ function mostrarFacturaGenerada(datos){
 function revertirVenta(venta){
   venta.items.forEach(it => {
     const p = state.productos.find(x=>x.id===it.productoId);
-    if(p) p.stock += it.cantidad;
+    if(p) sumarStockItem(p, it);
   });
   (venta.combos||[]).forEach(cv => {
     const combo = state.combos.find(x=>x.id===cv.comboId);
@@ -3628,12 +3639,14 @@ function vistaFiado(){
         <div class="text-right">
           <div class="text-xl font-extrabold ${c.fiado>0 ? 'text-red-600' : 'text-green-600'}">${money(c.fiado||0)}</div>
           ${c.limiteFiado>0 ? `<div class="text-gray-400 text-xs">límite ${money(c.limiteFiado)}</div>` : ''}
+          ${c.creditoAFavor>0 ? `<div class="text-emerald-600 text-xs font-bold">💳 ${money(c.creditoAFavor)} a favor</div>` : ''}
         </div>
       </div>
       <div class="grid grid-cols-2 gap-2">
         ${c.fiado>0 ? `<button onclick="registrarPagoFiado('${c.id}')" class="tap bg-green-50 text-green-700 font-bold py-2.5 rounded-xl">💵 Registrar pago</button>` : `<button disabled class="bg-gray-50 text-gray-300 font-bold py-2.5 rounded-xl">Sin deuda</button>`}
         ${c.telefono ? `<a href="https://wa.me/${limpiarTelefono(c.telefono)}?text=${encodeURIComponent('Hola '+c.nombre+'! Te escribo de '+state.negocio.nombre+' para recordarte tu cuenta pendiente de '+money(c.fiado||0)+'. ¡Gracias!')}" target="_blank" class="tap bg-indigo-50 text-indigo-700 font-bold py-2.5 rounded-xl text-center">💬 Recordar</a>` : `<button onclick="toast('Este cliente no tiene teléfono cargado', {icon:'📵'})" class="bg-gray-50 text-gray-400 font-bold py-2.5 rounded-xl">💬 Recordar</button>`}
       </div>
+      ${c.creditoAFavor>0 ? `<button onclick="usarCreditoCliente('${c.id}')" class="tap w-full bg-emerald-50 text-emerald-700 font-bold py-2.5 rounded-xl mt-2">💳 Usar crédito a favor</button>` : ''}
     </div>
   `).join('') : `
   <div class="text-center py-16 text-gray-400">
@@ -3728,6 +3741,33 @@ function confirmarPagoFiado(clienteId){
   cerrarModal();
   renderApp();
   toast(`¡Pago registrado! ${cliente.nombre} ahora debe ${money(cliente.fiado)}`, { icon:'✅' });
+}
+// El crédito a favor (de una devolución) es un saldo aparte del fiado (que
+// es al revés: lo que el cliente debe). Se anota como que "se usó" cuando
+// el dueño lo descuenta a mano al cobrar una compra nueva — no está atado
+// al checkout automáticamente, así el dueño decide cuánto aplicar cada vez.
+function usarCreditoCliente(clienteId){
+  const cliente = state.clientes.find(c=>c.id===clienteId);
+  abrirModal(`
+    <div class="p-5">
+      <div class="text-xl font-extrabold text-gray-900 mb-1">Usar crédito de ${cliente.nombre}</div>
+      <div class="text-gray-400 mb-4">Tiene ${money(cliente.creditoAFavor||0)} a favor. Poné cuánto vas a descontarle en esta compra.</div>
+      <input id="cred-monto" type="number" inputmode="decimal" value="${cliente.creditoAFavor||0}" max="${cliente.creditoAFavor||0}" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg mb-4" />
+      <button onclick="confirmarUsoCredito('${clienteId}')" class="tap w-full bg-emerald-600 text-white font-bold py-4 rounded-2xl text-lg">Descontar del crédito</button>
+    </div>
+  `);
+}
+function confirmarUsoCredito(clienteId){
+  const cliente = state.clientes.find(c=>c.id===clienteId);
+  const monto = parseFloat(document.getElementById('cred-monto').value);
+  if(!monto || monto <= 0){ toast('Poné un monto válido', {icon:'✍️'}); return; }
+  if(monto > (cliente.creditoAFavor||0)){ toast('Ese monto es más que el crédito disponible', {icon:'⚠️'}); return; }
+  cliente.creditoAFavor = (cliente.creditoAFavor||0) - monto;
+  state.fiadoMovimientos.push({ id: uid(), clienteId, tipo:'credito-usado', monto, fecha: Date.now(), detalle:'Crédito usado en una compra' });
+  guardar();
+  cerrarModal();
+  renderApp();
+  toast(`Descontá ${money(monto)} de esta venta. Le quedan ${money(cliente.creditoAFavor)} a favor.`, { icon:'💳', duracion:5000 });
 }
 
 /* ====================== STOCK ====================== */
@@ -5158,7 +5198,7 @@ function guardarCliente(id){
   if(id){
     Object.assign(state.clientes.find(c=>c.id===id), { nombre, telefono, cumpleanos, limiteFiado });
   } else {
-    state.clientes.push({ id: uid(), nombre, telefono, cumpleanos, limiteFiado, fiado: 0 });
+    state.clientes.push({ id: uid(), nombre, telefono, cumpleanos, limiteFiado, fiado: 0, creditoAFavor: 0 });
   }
   guardar();
   cerrarModal();
@@ -5408,6 +5448,7 @@ function verDetalleVenta(id){
       </div>
       <button onclick="imprimirComprobante('${id}')" class="tap w-full bg-gray-50 text-gray-700 font-bold py-3.5 rounded-2xl mb-2">🖨️ Imprimir comprobante</button>
       ${state.negocio.emailjs?.serviceId ? `<button onclick="enviarComprobantePorEmail('${id}')" class="tap w-full bg-gray-50 text-gray-700 font-bold py-3.5 rounded-2xl mb-2">📧 Enviar por email</button>` : ''}
+      ${venta.items && venta.items.length ? `<button onclick="mostrarCambioDevolucion('${id}')" class="tap w-full bg-emerald-50 text-emerald-700 font-bold py-3.5 rounded-2xl mb-2">🔄 Cambio / devolución</button>` : ''}
       <button onclick="eliminarVenta('${id}')" class="tap w-full bg-red-50 text-red-600 font-bold py-3.5 rounded-2xl">🗑️ Eliminar esta venta</button>
     </div>
   `);
@@ -5461,6 +5502,149 @@ function eliminarVenta(id){
     toast('Venta eliminada', { icon:'🗑️' });
   });
 }
+
+/* ====================== CAMBIOS Y DEVOLUCIONES ======================
+   No reescribe la venta original (queda como prueba de lo que se vendió en
+   realidad): solo ajusta el stock actual y, si es una devolución, deja un
+   crédito a favor del cliente. Un "cambio de talle" es, en el fondo, una
+   devolución del talle viejo + una salida del talle nuevo, sin que cambie
+   plata de mano. */
+let _devolucionEnCurso = null;
+function mostrarCambioDevolucion(ventaId, itemIndex = null){
+  const venta = state.ventas.find(v=>v.id===ventaId);
+  if(!venta) return;
+  if(itemIndex === null){
+    abrirModal(`
+      <div class="p-5">
+        <div class="text-xl font-extrabold text-gray-900 mb-1">Cambio o devolución</div>
+        <div class="text-gray-400 text-sm mb-4">Elegí qué producto de esta venta</div>
+        <div class="flex flex-col gap-2">
+          ${venta.items.map((it,i) => {
+            const p = state.productos.find(x=>x.id===it.productoId);
+            return `<button onclick="mostrarCambioDevolucion('${ventaId}', ${i})" class="tap w-full flex items-center justify-between bg-gray-50 rounded-2xl px-4 py-3.5 text-left">
+              <span class="font-bold text-gray-800">${it.cantidad} x ${p?p.nombre:'(producto eliminado)'}${it.talle?` (${it.talle}${it.color?' · '+it.color:''})`:''}</span>
+              <span class="text-gray-400">${money(it.precio)}</span>
+            </button>`;
+          }).join('')}
+        </div>
+        <button onclick="cerrarModal()" class="tap w-full text-gray-400 font-semibold py-3 mt-3">Cancelar</button>
+      </div>
+    `);
+    return;
+  }
+  const it = venta.items[itemIndex];
+  const p = state.productos.find(x=>x.id===it.productoId);
+  abrirModal(`
+    <div class="p-5">
+      <div class="text-xl font-extrabold text-gray-900 mb-1">${p?p.nombre:'(producto eliminado)'}${it.talle?` (${it.talle}${it.color?' · '+it.color:''})`:''}</div>
+      <div class="text-gray-400 text-sm mb-4">Vendido: ${it.cantidad} x ${money(it.precio)}</div>
+      <label class="font-semibold text-gray-600 text-sm">Cantidad a devolver/cambiar</label>
+      <input id="cd-cantidad" type="number" min="1" max="${it.cantidad}" value="${it.cantidad}" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg my-2 mb-3" />
+      <button onclick="procesarDevolucionCredito('${ventaId}', ${itemIndex})" class="tap w-full bg-indigo-700 text-white font-bold py-3.5 rounded-2xl mb-2">💳 Devolver con nota de crédito</button>
+      ${p && p.variantes && p.variantes.length ? `<button onclick="mostrarSelectorCambioTalle('${ventaId}', ${itemIndex})" class="tap w-full bg-white border-2 border-gray-200 text-gray-700 font-bold py-3.5 rounded-2xl mb-2">🔁 Cambiar por otro talle/color</button>` : ''}
+      <button onclick="cerrarModal()" class="tap w-full text-gray-400 font-semibold py-3">Cancelar</button>
+    </div>
+  `);
+}
+function procesarDevolucionCredito(ventaId, itemIndex){
+  const venta = state.ventas.find(v=>v.id===ventaId);
+  const it = venta.items[itemIndex];
+  const cantidad = Math.min(it.cantidad, Math.max(1, parseInt(document.getElementById('cd-cantidad').value) || 1));
+  _devolucionEnCurso = { ventaId, itemIndex, cantidad, monto: it.precio * cantidad };
+  mostrarSelectorClienteCredito();
+}
+function mostrarSelectorClienteCredito(){
+  const { monto } = _devolucionEnCurso;
+  abrirModal(`
+    <div class="p-5">
+      <div class="text-xl font-extrabold text-gray-900 mb-1">Nota de crédito por ${money(monto)}</div>
+      <div class="text-gray-400 mb-4">¿A nombre de quién queda el crédito?</div>
+      <div class="flex flex-col gap-2 max-h-64 overflow-y-auto mb-4">
+        ${state.clientes.map(c => `
+          <button onclick="confirmarDevolucionCredito('${c.id}')" class="tap card p-3 flex items-center justify-between text-left">
+            <span class="font-bold text-gray-800">👤 ${c.nombre}</span>
+            <span class="text-gray-400 text-sm">${c.creditoAFavor>0?'Ya tiene '+money(c.creditoAFavor)+' a favor':''}</span>
+          </button>`).join('')}
+      </div>
+      <button onclick="mostrarFormNuevoClienteCredito()" class="tap w-full bg-indigo-700 text-white font-bold py-3 rounded-xl">+ Nuevo cliente</button>
+      <button onclick="cerrarModal(); _devolucionEnCurso=null;" class="tap w-full text-gray-400 font-semibold py-3 mt-2">Cancelar</button>
+    </div>
+  `);
+}
+function mostrarFormNuevoClienteCredito(){
+  abrirModal(`
+    <div class="p-5">
+      <div class="text-xl font-extrabold text-gray-900 mb-4">Nuevo cliente</div>
+      <input id="nc-nombre" placeholder="Nombre" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg mb-3" />
+      <input id="nc-telefono" placeholder="WhatsApp (opcional)" class="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-lg mb-4" />
+      <button onclick="crearClienteYAplicarCredito()" class="tap w-full bg-indigo-700 text-white font-bold py-4 rounded-2xl text-lg">Guardar y dar el crédito</button>
+    </div>
+  `);
+}
+function crearClienteYAplicarCredito(){
+  const nombre = document.getElementById('nc-nombre').value.trim();
+  if(!nombre){ toast('Escribí el nombre del cliente', {icon:'✍️'}); return; }
+  const telefono = document.getElementById('nc-telefono').value.trim();
+  const cliente = { id: uid(), nombre, telefono, limiteFiado: 0, fiado: 0, creditoAFavor: 0 };
+  state.clientes.push(cliente);
+  confirmarDevolucionCredito(cliente.id);
+}
+function confirmarDevolucionCredito(clienteId){
+  if(!_devolucionEnCurso) return;
+  const { ventaId, itemIndex, cantidad, monto } = _devolucionEnCurso;
+  const venta = state.ventas.find(v=>v.id===ventaId);
+  const it = venta.items[itemIndex];
+  const p = state.productos.find(x=>x.id===it.productoId);
+  if(p) sumarStockItem(p, { talle: it.talle, color: it.color, cantidad });
+  const cliente = state.clientes.find(c=>c.id===clienteId);
+  cliente.creditoAFavor = (cliente.creditoAFavor||0) + monto;
+  state.fiadoMovimientos.push({ id: uid(), clienteId, tipo:'credito', monto, fecha: Date.now(), detalle:`Nota de crédito por devolución (${cantidad} x ${p?p.nombre:'producto'})`, ventaId });
+  guardar();
+  cerrarModal();
+  renderApp();
+  toast(`Nota de crédito de ${money(monto)} para ${cliente.nombre}`, { icon:'💳', duracion:5000 });
+  _devolucionEnCurso = null;
+}
+function mostrarSelectorCambioTalle(ventaId, itemIndex){
+  const venta = state.ventas.find(v=>v.id===ventaId);
+  const it = venta.items[itemIndex];
+  const p = state.productos.find(x=>x.id===it.productoId);
+  if(!p) return;
+  const cantEl = document.getElementById('cd-cantidad');
+  const cantidad = Math.min(it.cantidad, Math.max(1, parseInt(cantEl ? cantEl.value : it.cantidad) || it.cantidad));
+  _devolucionEnCurso = { ventaId, itemIndex, cantidad };
+  abrirModal(`
+    <div class="p-5">
+      <div class="text-xl font-extrabold text-gray-900 mb-1">${p.nombre}</div>
+      <div class="text-gray-400 text-sm mb-4">Elegí el nuevo talle${p.variantes.some(v=>v.color)?' y color':''}</div>
+      <div class="flex flex-col gap-2">
+        ${p.variantes.map(va => `
+          <button onclick="confirmarCambioTalle('${va.talle}','${(va.color||'').replace(/'/g,"\\'")}')" class="tap w-full flex items-center justify-between bg-gray-50 rounded-2xl px-4 py-3.5 ${va.stock<=0?'opacity-40 pointer-events-none':''}">
+            <span class="font-bold text-gray-800">${va.talle}${va.color?' · '+va.color:''}</span>
+            <span class="text-gray-500 text-sm">${va.stock>0?'Quedan '+va.stock:'Sin stock'}</span>
+          </button>
+        `).join('')}
+      </div>
+      <button onclick="cerrarModal(); _devolucionEnCurso=null;" class="tap w-full text-gray-400 font-semibold py-3 mt-3">Cancelar</button>
+    </div>
+  `);
+}
+function confirmarCambioTalle(nuevoTalle, nuevoColor){
+  if(!_devolucionEnCurso) return;
+  const { ventaId, itemIndex, cantidad } = _devolucionEnCurso;
+  const venta = state.ventas.find(v=>v.id===ventaId);
+  const it = venta.items[itemIndex];
+  const p = state.productos.find(x=>x.id===it.productoId);
+  if(!p) return;
+  sumarStockItem(p, { talle: it.talle, color: it.color, cantidad });
+  descontarStockItem(p, { talle: nuevoTalle, color: nuevoColor, cantidad });
+  guardar();
+  cerrarModal();
+  renderApp();
+  toast(`Cambiado a ${nuevoTalle}${nuevoColor?' · '+nuevoColor:''}`, { icon:'🔁', duracion:4000 });
+  _devolucionEnCurso = null;
+}
+
 function dibujarGraficoReportes(){
   const ctx = document.getElementById('chart-reportes');
   if(!ctx) return;
