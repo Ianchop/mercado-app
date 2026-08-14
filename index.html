@@ -4873,6 +4873,7 @@ function mostrarMapaUbicacionLocal(){
         <input id="envio-buscar-local" placeholder="Buscar dirección..." class="flex-1 border-2 border-gray-200 rounded-2xl px-4 py-3 text-base" onkeydown="if(event.key==='Enter'){event.preventDefault(); buscarDireccionEnvioLocal();}" />
         <button onclick="buscarDireccionEnvioLocal()" class="tap bg-indigo-700 text-white font-bold px-4 rounded-2xl">Buscar</button>
       </div>
+      <button onclick="usarUbicacionActualLocal()" class="tap w-full bg-gray-50 text-gray-700 font-bold py-2.5 rounded-xl text-sm mb-2">📍 Usar mi ubicación actual</button>
       <div id="envio-resultados-local" class="mb-2"></div>
       <div id="mapa-envio-local" style="height:280px; border-radius:16px; overflow:hidden;" class="border-2 border-gray-200 mb-3"></div>
       <button onclick="guardarUbicacionLocal()" class="tap w-full bg-indigo-700 text-white font-bold py-4 rounded-2xl text-lg mb-2">Guardar ubicación</button>
@@ -4910,6 +4911,18 @@ function elegirDireccionEnvioLocal(lat, lng){
     _mapaEnvioLocal.setView([lat, lng], 16);
   }
   document.getElementById('envio-resultados-local').innerHTML = '';
+}
+function usarUbicacionActualLocal(){
+  if(!navigator.geolocation){
+    toast('Tu navegador no permite compartir ubicación acá. Buscá tu dirección o marcá el mapa a mano.', {icon:'⚠️', duracion:4500});
+    return;
+  }
+  toast('Buscando tu ubicación...', {icon:'📍', duracion:2500});
+  navigator.geolocation.getCurrentPosition(
+    (pos) => elegirDireccionEnvioLocal(pos.coords.latitude, pos.coords.longitude),
+    () => toast('No pudimos acceder a tu ubicación. Buscá tu dirección o marcá el mapa a mano.', {icon:'⚠️', duracion:4500}),
+    { enableHighAccuracy:true, timeout:10000 }
+  );
 }
 function guardarUbicacionLocal(){
   if(!_marcadorEnvioLocal) return;
@@ -6071,6 +6084,7 @@ function mostrarCarritoPublico(){
             <input id="pub-buscar-direccion" placeholder="Buscar dirección..." class="flex-1 border-2 border-gray-200 rounded-2xl px-3 py-2.5 text-sm" onkeydown="if(event.key==='Enter'){event.preventDefault(); buscarDireccionEnvioCliente();}" />
             <button onclick="buscarDireccionEnvioCliente()" class="tap bg-indigo-700 text-white font-bold px-3 rounded-xl text-sm">Buscar</button>
           </div>
+          <button onclick="usarUbicacionActualCliente()" class="tap w-full bg-gray-50 text-gray-700 font-bold py-2 rounded-xl text-sm mb-2">📍 Usar mi ubicación actual</button>
           <div id="pub-resultados-direccion" class="mb-2"></div>
           <div id="mapa-envio-cliente" style="height:220px; border-radius:16px; overflow:hidden;" class="border-2 border-gray-200"></div>
           <div class="text-gray-400 text-sm mt-2">Distancia: <span id="pub-km-envio">${envio.km || '—'}</span> km · Costo de envío: <span id="pub-costo-envio">${money(envio.costo)}</span></div>
@@ -6168,6 +6182,21 @@ function elegirDireccionEnvioCliente(lat, lng){
   const cont = document.getElementById('pub-resultados-direccion');
   if(cont) cont.innerHTML = '';
   actualizarCostoEnvioClienteUI();
+}
+// El GPS del navegador (geolocalización) solo funciona en sitios con HTTPS
+// (o localhost) — en HTTP directamente no existe navigator.geolocation, así
+// que hay que avisar en vez de fallar en silencio.
+function usarUbicacionActualCliente(){
+  if(!navigator.geolocation){
+    toast('Tu navegador no permite compartir ubicación acá. Buscá tu dirección o marcá el mapa a mano.', {icon:'⚠️', duracion:4500});
+    return;
+  }
+  toast('Buscando tu ubicación...', {icon:'📍', duracion:2500});
+  navigator.geolocation.getCurrentPosition(
+    (pos) => elegirDireccionEnvioCliente(pos.coords.latitude, pos.coords.longitude),
+    () => toast('No pudimos acceder a tu ubicación. Buscá tu dirección o marcá el mapa a mano.', {icon:'⚠️', duracion:4500}),
+    { enableHighAccuracy:true, timeout:10000 }
+  );
 }
 function textoPedidoPublico(items, total, envio){
   let txt = 'Hola! Quiero hacer un pedido:\n\n';
