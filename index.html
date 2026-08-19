@@ -101,6 +101,10 @@
     return snap.docs.map(d => ({ id: d.id, ...d.data() }));
   };
   window.fbMarcarPagado = (uid, datos) => updateDoc(doc(fbDb, 'suscripciones', uid), datos);
+  // Mismo update de Firestore que fbMarcarPagado, con otro nombre para que
+  // se entienda en el código quién lo llama: acá es el propio dueño
+  // cancelando (o descancelando) su suscripción, no el admin cobrando.
+  window.fbActualizarMiSuscripcion = (uid, datos) => updateDoc(doc(fbDb, 'suscripciones', uid), datos);
   window.fbCargarConfigPagos = async () => {
     const snap = await getDoc(doc(fbDb, 'config', 'pagos'));
     return snap.exists() ? snap.data() : { linkMercadoPago: '' };
@@ -413,10 +417,17 @@ function calcularProximoVencimiento(){
   d.setMonth(d.getMonth() + 1);
   return d.toISOString().slice(0,10);
 }
+function calcularVencimientoPrueba(){
+  const d = new Date();
+  d.setDate(d.getDate() + 3);
+  return d.toISOString().slice(0,10);
+}
 function estadoSuscripcionInfo(s){
   const hoy = new Date().toISOString().slice(0,10);
   if(!s || !s.proximoVencimiento) return { texto: 'Nunca pagó', bg:'#fef2f2', color:'#dc2626' };
   if(s.proximoVencimiento < hoy) return { texto: `Vencido (${formatearFechaCorta(s.proximoVencimiento)})`, bg:'#fef2f2', color:'#dc2626' };
+  if(s.cancelada) return { texto: `Cancelada (hasta ${formatearFechaCorta(s.proximoVencimiento)})`, bg:'#f4f5f7', color:'#6b7280' };
+  if(s.enPrueba) return { texto: `Prueba gratis hasta ${formatearFechaCorta(s.proximoVencimiento)}`, bg:'#eef0ff', color:'#4338ca' };
   return { texto: `Activo hasta ${formatearFechaCorta(s.proximoVencimiento)}`, bg:'#ecfdf5', color:'#059669' };
 }
 
@@ -2500,7 +2511,7 @@ function finalizarOnboarding(tipo){
   // El negocio de demo del propio admin no paga ni aparece en la lista de
   // negocios reales: no le creamos suscripción, ya está exento en el router.
   if(!esAdminActual()){
-    suscripcionActual = { email: usuarioFirebase.email, nombreNegocio: onboardingNombre, tipo, fechaCreacion: Date.now(), proximoVencimiento: '' };
+    suscripcionActual = { email: usuarioFirebase.email, nombreNegocio: onboardingNombre, tipo, fechaCreacion: Date.now(), proximoVencimiento: calcularVencimientoPrueba(), enPrueba: true, cancelada: false };
     window.fbCrearSuscripcion(usuarioFirebase.uid, suscripcionActual).catch(() => {});
   }
   // fbOnCambioAuth (donde normalmente arranca esto) ya pasó y en ese momento
@@ -2514,15 +2525,18 @@ function finalizarOnboarding(tipo){
 /* ====================== SUSCRIPCIÓN: pantalla de pago (dueños) ====================== */
 function vistaPago(){
   const yaVencio = !!(suscripcionActual && suscripcionActual.proximoVencimiento);
+  const eraPrueba = !!(suscripcionActual && suscripcionActual.enPrueba);
   const link = configPagos.linkMercadoPago || '';
   return `
   <div class="min-h-screen flex flex-col items-center justify-center px-6 text-center">
     ${logoApp('credit-card', yaVencio ? '#fef2f2' : '#eef0ff', yaVencio ? '#dc2626' : '#4338ca')}
-    <h1 class="text-2xl font-extrabold text-gray-900 mb-2">${yaVencio ? 'Tu suscripción venció' : 'Activá tu cuenta'}</h1>
+    <h1 class="text-2xl font-extrabold text-gray-900 mb-2">${eraPrueba ? 'Se terminó tu prueba gratis' : (yaVencio ? 'Tu suscripción venció' : 'Activá tu cuenta')}</h1>
     <p class="text-gray-500 mb-8 text-lg">
-      ${yaVencio
-        ? `Venció el ${formatearFechaCorta(suscripcionActual.proximoVencimiento)}. Renovala para seguir usando ${state.negocio ? state.negocio.nombre : 'tu negocio'}.`
-        : 'Para empezar a usar tu negocio, activá tu suscripción de $5.000 por mes.'}
+      ${eraPrueba
+        ? `Tus 3 días de prueba gratis terminaron el ${formatearFechaCorta(suscripcionActual.proximoVencimiento)}. Activá tu suscripción para seguir usando ${state.negocio ? state.negocio.nombre : 'tu negocio'}.`
+        : yaVencio
+          ? `Venció el ${formatearFechaCorta(suscripcionActual.proximoVencimiento)}. Renovala para seguir usando ${state.negocio ? state.negocio.nombre : 'tu negocio'}.`
+          : 'Para empezar a usar tu negocio, activá tu suscripción de $5.000 por mes.'}
     </p>
     ${link
       ? `<a href="${link}" target="_blank" rel="noopener" class="tap w-full bg-indigo-700 text-white font-bold text-xl py-4 rounded-2xl shadow-lg mb-4 flex items-center justify-center gap-2">${icono('credit-card','w-5 h-5')} Pagar suscripción — $5.000/mes</a>`
@@ -2581,7 +2595,7 @@ function salirDemoAdmin(){
 function marcarNegocioPagado(uidNegocio){
   const proximoVencimiento = calcularProximoVencimiento();
   const hoy = new Date().toISOString().slice(0,10);
-  window.fbMarcarPagado(uidNegocio, { proximoVencimiento, ultimoPago: hoy })
+  window.fbMarcarPagado(uidNegocio, { proximoVencimiento, ultimoPago: hoy, enPrueba: false, cancelada: false })
     .then(async () => {
       toast('Marcado como pagado', {icon:'✅'});
       listaSuscripciones = await window.fbListarSuscripciones();
@@ -5914,6 +5928,20 @@ function dibujarGraficoReportes(){
 /* ====================== CONFIGURACIÓN ====================== */
 function vistaConfig(){
   return `
+  ${(!esAdminActual() && suscripcionActual) ? (() => {
+    const info = estadoSuscripcionInfo(suscripcionActual);
+    return `
+    <div class="card p-4 mt-2 mb-4">
+      <div class="font-bold text-gray-700 mb-2 text-lg">Tu suscripción</div>
+      <div class="badge-venc inline-block mb-3" style="background:${info.bg};color:${info.color};">${info.texto}</div>
+      ${suscripcionActual.cancelada
+        ? `<div class="text-gray-500 text-sm mb-3">Ya la cancelaste. Vas a poder seguir usando la app hasta que venza, y no se te va a esperar un pago nuevo después.</div>
+           <button onclick="reactivarSuscripcion()" class="tap w-full bg-white border-2 border-gray-200 text-gray-700 font-bold py-3 rounded-2xl">Che, no la quiero cancelar</button>`
+        : `<div class="text-gray-500 text-sm mb-3">Si cancelás, seguís usando la app normal hasta que venza tu ${suscripcionActual.enPrueba?'prueba gratis':'suscripción'} — después no se te va a volver a cobrar.</div>
+           <button onclick="cancelarSuscripcion()" class="tap w-full bg-red-50 text-red-600 font-bold py-3 rounded-2xl">Cancelar suscripción</button>`}
+    </div>
+    `;
+  })() : ''}
   <div class="card p-4 mt-2 mb-4">
     <div class="font-bold text-gray-700 mb-3 text-lg">Datos del negocio</div>
     <label class="font-semibold text-gray-600">Nombre</label>
@@ -6103,6 +6131,31 @@ function guardarConfig(){
   guardar();
   renderApp();
   toast('Datos guardados', {icon:'✅'});
+}
+// Cancelar NO corta el acceso al toque: solo marca que no hay que esperar
+// que este negocio vuelva a pagar. El acceso real lo sigue controlando
+// nomás la fecha de vencimiento de siempre (suscripcionValida), así que
+// sigue andando normal hasta esa fecha.
+function cancelarSuscripcion(){
+  confirmarAccion(`¿Cancelar tu suscripción? Vas a poder seguir usando ${state.negocio.nombre} hasta que venza (${formatearFechaCorta(suscripcionActual.proximoVencimiento)}), pero después no se te va a esperar un pago nuevo.`, () => {
+    window.fbActualizarMiSuscripcion(usuarioFirebase.uid, { cancelada: true })
+      .then(() => {
+        suscripcionActual.cancelada = true;
+        cerrarModal();
+        renderApp();
+        toast('Suscripción cancelada', {icon:'👋'});
+      })
+      .catch(() => toast('No se pudo cancelar. Revisá tu conexión.', {icon:'⚠️', duracion:4000}));
+  }, 'Sí, cancelar');
+}
+function reactivarSuscripcion(){
+  window.fbActualizarMiSuscripcion(usuarioFirebase.uid, { cancelada: false })
+    .then(() => {
+      suscripcionActual.cancelada = false;
+      renderApp();
+      toast('¡Listo, seguís activo!', {icon:'✅'});
+    })
+    .catch(() => toast('No se pudo actualizar. Revisá tu conexión.', {icon:'⚠️', duracion:4000}));
 }
 function agregarCupon(){
   const codigo = document.getElementById('cfg-cupon-codigo').value.trim().toUpperCase();

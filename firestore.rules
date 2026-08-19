@@ -13,7 +13,18 @@ service cloud.firestore {
       allow get: if request.auth != null && (request.auth.uid == uid || esAdmin());
       allow list: if esAdmin();
       allow create: if request.auth != null && request.auth.uid == uid;
-      allow update, delete: if esAdmin();
+      // El dueño puede actualizar su propia suscripción SOLO para cancelarla
+      // (o descancelarla): no puede tocar la fecha de vencimiento, el mail,
+      // el rubro ni la fecha de creación — eso lo sigue manejando el admin,
+      // así nadie se puede autoextender el acceso.
+      allow update: if esAdmin() || (
+        request.auth != null && request.auth.uid == uid &&
+        request.resource.data.proximoVencimiento == resource.data.proximoVencimiento &&
+        request.resource.data.email == resource.data.email &&
+        request.resource.data.tipo == resource.data.tipo &&
+        request.resource.data.fechaCreacion == resource.data.fechaCreacion
+      );
+      allow delete: if esAdmin();
     }
 
     match /config/{docId} {
